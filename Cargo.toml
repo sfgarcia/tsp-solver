@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 egui_graphs = "0.20.0"
+eframe = "0.27.2"
+petgraph = "0.6.4"

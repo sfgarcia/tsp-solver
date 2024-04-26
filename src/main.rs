@@ -1,4 +1,6 @@
-use egui_graphs::Graph;
+use eframe::{egui::{self, Context}, run_native, App, CreationContext};
+use egui_graphs::{Graph, GraphView, DefaultNodeShape, DefaultEdgeShape};
+use petgraph::{stable_graph::StableGraph, Directed};
 
 fn main() {
     let native_options = eframe::NativeOptions::default();
@@ -9,6 +11,7 @@ fn main() {
     )
     .unwrap();
 }
+
 
 pub struct BasicApp {
     g: Graph<(), (), Directed>,
