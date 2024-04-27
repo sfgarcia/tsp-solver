@@ -21,6 +21,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let graph = generate_graph();
 
+    for edge in graph.edge_indices() {
+        let (start_node, end_node) = graph.edge_endpoints(edge).unwrap();
+        let start_point = &graph[start_node];
+        let end_point = &graph[end_node];
+
+        // Draw the edge as a line between the start node and the end node
+        chart.draw_series(LineSeries::new(
+            vec![(start_point.x, start_point.y), (end_point.x, end_point.y)],
+            &BLACK,
+        ))?;
+    }
+
     for (i, node) in graph.node_indices().enumerate() {
         let point = &graph[node];
         chart.draw_series(PointSeries::of_element(
@@ -35,7 +47,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Add labels to the nodes
         let label_coord = (point.x * width as f32, point.y * height as f32);
-        println!("Node {}: {:?}", i, label_coord);
         let text_style = TextStyle::from(("Arial", 15).into_font()).color(&BLACK);
         root.draw_text(&format!("Node {}", i), &text_style, (label_coord.0 as i32, (height as f32 - label_coord.1) as i32 - 20))?;
     }
