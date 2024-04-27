@@ -1,8 +1,8 @@
 use plotters::prelude::*;
-use petgraph::stable_graph::StableGraph;
+use petgraph::graph::Graph;
 use petgraph::Directed;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Node {
     x: f32,
     y: f32,
@@ -65,16 +65,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn generate_graph() -> StableGraph<Node, (), Directed> {
-    let mut g: StableGraph<Node, ()> = StableGraph::new();
+fn generate_graph() -> Graph<Node, (), Directed> {
+    let nodes = vec![
+        Node { x: 0.0, y: 0.0 },
+        Node { x: 100.0, y: 50.0 },
+        Node { x: 50.0, y: 100.0 },
+    ];
+    let edges = vec![(0, 1), (1, 2), (2, 0)];
+    let mut tour = Tour::new(nodes);
 
-    let a = g.add_node(Node { x: 0.0, y: 0.0 });
-    let b = g.add_node(Node { x: 100.0, y: 50.0 });
-    let c = g.add_node(Node { x: 50.0, y: 100.0 });
+    tour.add_edges(edges);
+    tour.graph
+}
 
-    g.add_edge(a, b, ());
-    g.add_edge(b, c, ());
-    g.add_edge(c, a, ());
+struct Tour {
+    nodes: Vec<Node>,
+    graph: Graph<Node, (), Directed>,
+    cost: f32,
+}
 
-    g
+impl Tour {
+    fn new(nodes: Vec<Node>) -> Self {
+        let mut graph: Graph<Node, ()> = Graph::new();
+        for node in nodes.iter() {
+            graph.add_node(node.clone());
+        }
+        Self { nodes, graph, cost: 0.0 }
+    }
+
+    fn add_edge(&mut self, a: usize, b: usize) {
+        let a = self.graph.node_indices().nth(a).unwrap();
+        let b = self.graph.node_indices().nth(b).unwrap();
+        self.graph.add_edge(a, b, ());
+    }
+
+    fn add_edges(&mut self, edges: Vec<(usize, usize)>) {
+        for (a, b) in edges {
+            self.add_edge(a, b);
+        }
+    }
 }
