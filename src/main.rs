@@ -21,6 +21,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let min_y = graph.node_indices().map(|i| graph[i].y).fold(f32::INFINITY, f32::min);
     let max_y = graph.node_indices().map(|i| graph[i].y).fold(f32::NEG_INFINITY, f32::max);
 
+    // Add a margin to the drawing area
+    let margin = 40;
+    let drawing_width = width - 2 * margin;
+    let drawing_height = height - 2 * margin;
+
     let mut chart = ChartBuilder::on(&root)
         .margin(5)
         .x_label_area_size(30)
@@ -52,7 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))?;
 
         // Add labels to the nodes
-        let label_coord = (point.x * width as f32, point.y * height as f32);
+        let label_coord = ((point.x - min_x) / (max_x - min_x) * drawing_width as f32 + margin as f32, (point.y - min_y) / (max_y - min_y) * drawing_height as f32 + margin as f32);
         let text_style = TextStyle::from(("Arial", 15).into_font()).color(&BLACK);
         root.draw_text(&format!("Node {}", i), &text_style, (label_coord.0 as i32, (height as f32 - label_coord.1) as i32 - 20))?;
     }
