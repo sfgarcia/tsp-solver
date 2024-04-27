@@ -13,13 +13,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = BitMapBackend::new("graph.png", (width, height)).into_drawing_area();
     root.fill(&WHITE)?;
 
+    let graph = generate_graph();
+
+    // Find the minimum and maximum x and y values in the graph
+    let min_x = graph.node_indices().map(|i| graph[i].x).fold(f32::INFINITY, f32::min);
+    let max_x = graph.node_indices().map(|i| graph[i].x).fold(f32::NEG_INFINITY, f32::max);
+    let min_y = graph.node_indices().map(|i| graph[i].y).fold(f32::INFINITY, f32::min);
+    let max_y = graph.node_indices().map(|i| graph[i].y).fold(f32::NEG_INFINITY, f32::max);
+
     let mut chart = ChartBuilder::on(&root)
         .margin(5)
         .x_label_area_size(30)
         .y_label_area_size(30)
-        .build_cartesian_2d(0f32..1f32, 0f32..1f32)?;
-
-    let graph = generate_graph();
+        .build_cartesian_2d(min_x..max_x, min_y..max_y)?;
 
     for edge in graph.edge_indices() {
         let (start_node, end_node) = graph.edge_endpoints(edge).unwrap();
@@ -58,8 +64,8 @@ fn generate_graph() -> StableGraph<Node, (), Directed> {
     let mut g: StableGraph<Node, ()> = StableGraph::new();
 
     let a = g.add_node(Node { x: 0.0, y: 0.0 });
-    let b = g.add_node(Node { x: 0.8, y: 0.0 });
-    let c = g.add_node(Node { x: 0.5, y: 0.8 });
+    let b = g.add_node(Node { x: 100.0, y: 50.0 });
+    let c = g.add_node(Node { x: 50.0, y: 100.0 });
 
     g.add_edge(a, b, ());
     g.add_edge(b, c, ());
