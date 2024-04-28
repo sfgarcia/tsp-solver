@@ -1064,17 +1064,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui_graphs"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ff3d60913cbaf9efba15f1360ad921fb69b9e3904a1945582dee0f153c22990"
-dependencies = [
- "egui",
- "petgraph",
- "rand",
-]
-
-[[package]]
 name = "emath"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2944,9 +2933,9 @@ name = "tsp-solver"
 version = "0.1.0"
 dependencies = [
  "eframe",
- "egui_graphs",
  "petgraph",
  "plotters",
+ "rand",
 ]
 
 [[package]]

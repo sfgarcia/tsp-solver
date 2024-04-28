@@ -1,6 +1,8 @@
 use plotters::prelude::*;
 use petgraph::graph::Graph;
 use petgraph::Directed;
+use rand::Rng;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
 struct Node {
@@ -73,8 +75,8 @@ fn generate_graph() -> Graph<Node, (), Directed> {
     ];
     let edges = vec![(0, 1), (1, 2), (2, 0)];
     let mut tour = Tour::new(nodes);
+    tour.create_random_tour();
 
-    tour.add_edges(edges);
     tour.graph
 }
 
@@ -103,5 +105,21 @@ impl Tour {
         for (a, b) in edges {
             self.add_edge(a, b);
         }
+    }
+
+    fn create_random_tour(&mut self) {
+        let mut rng = rand::thread_rng();
+        let indices: Vec<usize> = (0..self.nodes.len()).collect();
+        let mut indices_set: HashSet<usize> = HashSet::from_iter(indices.clone());
+        // Select and remove a random index from the set of indices
+        let tour_init = indices_set.take(&rng.gen_range(0..indices_set.len())).unwrap();
+        let mut current_index = tour_init;
+        while indices_set.len() > 0 {
+            println!("{:?}", indices_set);
+            let next_index = indices_set.take(&rng.gen_range(0..indices_set.len())).unwrap();
+            self.add_edge(current_index, next_index);
+            current_index = next_index;
+        }
+        self.add_edge(current_index, tour_init);
     }
 }
