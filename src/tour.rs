@@ -1,4 +1,4 @@
-use petgraph::graph::Graph;
+use petgraph::graph::{Graph, NodeIndex};
 use petgraph::Directed;
 use rand::prelude::SliceRandom;
 use rand::Rng;
@@ -57,6 +57,10 @@ impl Tour {
         let node_a = &self.nodes[a];
         let node_b = &self.nodes[b];
         ((node_a.x - node_b.x).powi(2) + (node_a.y - node_b.y).powi(2)).sqrt()
+    }
+
+    fn get_node(&self, index: usize) -> NodeIndex {
+        self.graph.node_indices().nth(index).unwrap()
     }
 
     pub fn distance_matrix(&mut self) {
