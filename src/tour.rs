@@ -1,6 +1,7 @@
 use petgraph::graph::Graph;
 use petgraph::Directed;
 use rand::prelude::SliceRandom;
+use rand::Rng;
 
 #[derive(Debug, Clone)]
 pub struct Node {
@@ -19,6 +20,19 @@ impl Tour {
       let mut graph: Graph<Node, ()> = Graph::new();
       for node in nodes.iter() {
           graph.add_node(node.clone());
+      }
+      Self { nodes, graph, cost: 0.0 }
+  }
+
+  pub fn create_random_nodes(n: usize, width: f32, height: f32) -> Self {
+      let mut rng = rand::thread_rng();
+      let mut graph: Graph<Node, ()> = Graph::new();
+      let mut nodes: Vec<Node> = Vec::new();
+      for _ in 0..n {
+          let x = rng.gen::<f32>() * width;
+          let y = rng.gen::<f32>() * height;
+          nodes.push(Node { x, y });
+          graph.add_node(Node { x, y });
       }
       Self { nodes, graph, cost: 0.0 }
   }

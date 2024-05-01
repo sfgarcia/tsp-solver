@@ -71,8 +71,24 @@ fn generate_graph() -> Graph<Node, (), Directed> {
         Node { x: 25.0, y: 25.0 },
         Node { x: 35.0, y: 50.0 },
     ];
-    let edges = vec![(0, 1), (1, 2), (2, 0)];
     let mut tour = Tour::new(nodes);
+    tour.create_random_tour();
+
+    tour.graph
+}
+
+fn generate_random_graph() -> Graph<Node, (), Directed> {
+    /*
+    let nodes = vec![
+        Node { x: 0.0, y: 0.0 },
+        Node { x: 100.0, y: 50.0 },
+        Node { x: 50.0, y: 100.0 },
+        Node { x: 25.0, y: 25.0 },
+        Node { x: 35.0, y: 50.0 },
+    ];
+    let mut tour = Tour::new(nodes);
+    */
+    let mut tour = Tour::create_random_nodes(100, 100.0, 100.0);
     tour.create_random_tour();
 
     tour.graph
