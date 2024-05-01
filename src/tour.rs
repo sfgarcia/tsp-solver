@@ -9,10 +9,12 @@ pub struct Node {
     pub y: f32,
 }
 
+#[derive(Debug)]
 pub struct Tour {
     pub nodes: Vec<Node>,
     pub graph: Graph<Node, (), Directed>,
     pub cost: f32,
+    pub distance: Vec<Vec<f32>>,
 }
 
 impl Tour {
@@ -21,7 +23,8 @@ impl Tour {
         for node in nodes.iter() {
         graph.add_node(node.clone());
         }
-        Self { nodes, graph, cost: 0.0 }
+        let mut distance = vec![vec![0.0; nodes.len()]; nodes.len()];
+        Self { nodes, graph, cost: 0.0, distance }
     }
 
     pub fn create_random_nodes(n: usize, width: f32, height: f32) -> Self {
@@ -34,7 +37,8 @@ impl Tour {
             nodes.push(Node { x, y });
             graph.add_node(Node { x, y });
         }
-        Self { nodes, graph, cost: 0.0 }
+        let distance = vec![vec![0.0; nodes.len()]; nodes.len()];
+        Self { nodes, graph, cost: 0.0, distance }
     }
 
     fn add_edge(&mut self, a: usize, b: usize) {
@@ -55,14 +59,12 @@ impl Tour {
         ((node_a.x - node_b.x).powi(2) + (node_a.y - node_b.y).powi(2)).sqrt()
     }
 
-    pub fn distance_matrix(&self) -> Vec<Vec<f32>> {
-        let mut matrix = vec![vec![0.0; self.nodes.len()]; self.nodes.len()];
+    pub fn distance_matrix(&mut self) {
         for i in 0..self.nodes.len() {
             for j in 0..self.nodes.len() {
-                matrix[i][j] = self.distance(i, j);
+                self.distance[i][j] = self.distance(i, j);
             }
         }
-        matrix
     }
 
     fn calculate_cost(&mut self) {
@@ -89,6 +91,24 @@ impl Tour {
     }
 
     pub fn nearest_neighbour_tour(&mut self) {
-
+        self.distance_matrix();
+        let tour_init = 0;
+        let mut current_index = tour_init;
+        let mut visited = vec![false; self.nodes.len()];
+        visited[current_index] = true;
+        for _ in 0..self.nodes.len() - 1 {
+            let mut dist: Vec<f32> = self.distance[current_index].clone();
+            for i in 0..self.nodes.len() {
+                if visited[i] {
+                    dist[i] = f32::MAX;
+                }
+            }
+            let min_index = dist.iter().enumerate().min_by(|x, y| x.1.partial_cmp(y.1).unwrap()).unwrap().0;
+            self.add_edge(current_index, min_index);
+            visited[min_index] = true;
+            current_index = min_index;
+        }
+        println!("{} {}", current_index, tour_init);
+        self.add_edge(current_index, tour_init);
     }
 }
