@@ -72,7 +72,9 @@ fn generate_graph() -> Graph<Node, (), Directed> {
         Node { x: 35.0, y: 50.0 },
     ];
     let mut tour = Tour::new(nodes);
-    tour.create_random_tour();
+    tour.random_tour();
+    let matrix = tour.distance_matrix();
+    println!("{:?}", matrix);
 
     tour.graph
 }
@@ -89,7 +91,7 @@ fn generate_random_graph() -> Graph<Node, (), Directed> {
     let mut tour = Tour::new(nodes);
     */
     let mut tour = Tour::create_random_nodes(100, 100.0, 100.0);
-    tour.create_random_tour();
+    tour.random_tour();
 
     tour.graph
 }
