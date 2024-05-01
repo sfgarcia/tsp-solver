@@ -108,7 +108,6 @@ impl Tour {
             visited[min_index] = true;
             current_index = min_index;
         }
-        println!("{} {}", current_index, tour_init);
         self.add_edge(current_index, tour_init);
     }
 }
