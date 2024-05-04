@@ -103,7 +103,7 @@ impl Tour {
         let mut improved = true;
         while improved {
             improved = false;
-            for i in 0..self.route.len() - 2 {
+            for i in 1..self.route.len() - 2 {
                 for k in i + 1..self.route.len() - 1 {
                     let delta = self.distance(&self.route[i - 1], &self.route[i]) + self.distance(&self.route[k], &self.route[k + 1]) - self.distance(&self.route[i - 1], &self.route[k]) - self.distance(&self.route[i], &self.route[k + 1]);
                     if delta < 0.0 {
