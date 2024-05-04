@@ -26,7 +26,6 @@ impl Tour {
             route.push(Node { id, x: *x, y: *y });
             nodes.push(Node { id, x: *x, y: *y });
         }
-        println!("{:?}", nodes);
         route.push(route[0].clone());
         Self { route, nodes, cost: 0.0, distance }
     }
@@ -100,30 +99,28 @@ impl Tour {
         self.route = route;
     }
 
-    /*
     pub fn two_opt(&mut self) {
         let mut improved = true;
         while improved {
             improved = false;
-            for (i, edge1) in self.graph.edge_indices().enumerate() {
-                for edge2 in self.graph.edge_indices().skip(i + 1) {
-                    let (start_node1, end_node1) = self.graph.edge_endpoints(edge1).unwrap();
-                    let (start_node2, end_node2) = self.graph.edge_endpoints(edge2).unwrap();
-                    let cost1 = self.distance(start_node1.index(), end_node1.index()) + self.distance(start_node2.index(), end_node2.index());
-                    let cost2 = self.distance(start_node1.index(), start_node2.index()) + self.distance(end_node1.index(), end_node2.index());
-                    if cost2 < cost1 {
-                        self.graph.remove_edge(edge1);
-                        self.graph.remove_edge(edge2);
-                        self.add_edge(start_node1.index(), start_node2.index());
-                        self.add_edge(end_node1.index(), end_node2.index());
+            for i in 0..self.route.len() - 2 {
+                for k in i + 1..self.route.len() - 1 {
+                    let delta = self.distance(&self.route[i - 1], &self.route[i]) + self.distance(&self.route[k], &self.route[k + 1]) - self.distance(&self.route[i - 1], &self.route[k]) - self.distance(&self.route[i], &self.route[k + 1]);
+                    if delta < 0.0 {
+                        let new_route = self.route[0..i].to_vec()
+                            .into_iter()
+                            .chain(self.route[i..k + 1].to_vec().into_iter().rev())
+                            .chain(self.route[k + 1..self.route.len()].to_vec().into_iter())
+                            .collect();
+                        self.route = new_route;
                         improved = true;
-                        //println!("Removed edges ({}, {}) and ({}, {}) and added edges ({}, {}) and ({}, {})", start_node1.index(), end_node1.index(), start_node2.index(), end_node2.index(), start_node1.index(), start_node2.index(), end_node1.index(), end_node2.index());
                     }
                 }
             }
         }
     }
 
+    /*
     pub fn two_opt_swap(&mut self, i: usize, k: usize) {
         let mut new_tour = Vec::new();
         for j in 0..i {

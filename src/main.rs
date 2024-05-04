@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = BitMapBackend::new("graph.png", (width, height)).into_drawing_area();
     root.fill(&WHITE)?;
 
-    let route = generate_random_graph();
+    let route = generate_graph();
 
     // Find the minimum and maximum x and y values in the graph
     let min_x = route.iter().map(|node| node.x).fold(f32::INFINITY, |a, b| a.min(b));
@@ -65,15 +65,15 @@ fn generate_graph() -> Vec<Node> {
         (35.0, 50.0),
     ];
     let mut tour = Tour::new(nodes);
-    tour.nearest_neighbour_tour();
+    //tour.nearest_neighbour_tour();
     //tour.random_tour();
-    //tour.two_opt();
+    tour.two_opt();
     tour.route
 }
 
 fn generate_random_graph() -> Vec<Node> {
     let mut tour = Tour::create_random_nodes(10, 100.0, 100.0);
-    tour.nearest_neighbour_tour();
-    //tour.two_opt();
+    //tour.nearest_neighbour_tour();
+    tour.two_opt();
     tour.route
 }
