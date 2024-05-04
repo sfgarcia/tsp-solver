@@ -58,13 +58,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn generate_graph() -> Vec<Node> {
     let nodes = vec![
-        Node { id: 0, x: 0.0, y: 0.0 },
-        Node { id: 1, x: 100.0, y: 50.0 },
-        Node { id: 2, x: 50.0, y: 100.0 },
-        Node { id: 3, x: 25.0, y: 25.0 },
-        Node { id: 4, x: 35.0, y: 50.0 },
+        (0.0, 0.0),
+        (100.0, 50.0),
+        (50.0, 100.0),
+        (25.0, 25.0),
+        (35.0, 50.0),
     ];
     let mut tour = Tour::new(nodes);
+    tour.nearest_neighbour_tour();
     //tour.random_tour();
     //tour.two_opt();
     tour.route

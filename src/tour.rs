@@ -18,10 +18,16 @@ pub struct Tour {
 }
 
 impl Tour {
-    pub fn new(nodes: Vec<Node>) -> Self {
-        let distance = vec![vec![0.0; nodes.len() - 1]; nodes.len() - 1];
-        let mut route = nodes.clone();
-        route.push(nodes[0].clone());
+    pub fn new(positions: Vec<(f32, f32)>) -> Self {
+        let distance = vec![vec![0.0; positions.len()]; positions.len()];
+        let mut nodes: Vec<Node> = Vec::new();
+        let mut route: Vec<Node> = Vec::new();
+        for (id, (x, y)) in positions.iter().enumerate() {
+            route.push(Node { id, x: *x, y: *y });
+            nodes.push(Node { id, x: *x, y: *y });
+        }
+        println!("{:?}", nodes);
+        route.push(route[0].clone());
         Self { route, nodes, cost: 0.0, distance }
     }
 
@@ -36,7 +42,7 @@ impl Tour {
             nodes.push(Node {id, x, y });
         }
         route.push(route[0].clone());
-        let distance = vec![vec![0.0; route.len() - 1]; route.len() - 1];
+        let distance = vec![vec![0.0; nodes.len()]; nodes.len()];
         Self { nodes, route, cost: 0.0, distance }
     }
 
