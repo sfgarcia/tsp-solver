@@ -19,7 +19,7 @@ pub struct Tour {
 
 impl Tour {
     pub fn new(nodes: Vec<Node>) -> Self {
-        let mut distance = vec![vec![0.0; nodes.len()]; nodes.len()];
+        let distance = vec![vec![0.0; nodes.len() - 1]; nodes.len() - 1];
         let mut route = nodes.clone();
         route.push(nodes[0].clone());
         Self { route, nodes, cost: 0.0, distance }
@@ -36,7 +36,7 @@ impl Tour {
             nodes.push(Node {id, x, y });
         }
         route.push(route[0].clone());
-        let distance = vec![vec![0.0; route.len()]; route.len()];
+        let distance = vec![vec![0.0; route.len() - 1]; route.len() - 1];
         Self { nodes, route, cost: 0.0, distance }
     }
 
