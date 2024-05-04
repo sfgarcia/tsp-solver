@@ -114,4 +114,49 @@ impl Tour {
         }
         self.add_edge(current_index, tour_init);
     }
+
+    pub fn two_opt(&mut self) {
+        let mut improved = true;
+        while improved {
+            improved = false;
+            for (i, edge1) in self.graph.edge_indices().enumerate() {
+                for edge2 in self.graph.edge_indices().skip(i + 1) {
+                    let (start_node1, end_node1) = self.graph.edge_endpoints(edge1).unwrap();
+                    let (start_node2, end_node2) = self.graph.edge_endpoints(edge2).unwrap();
+                    let cost1 = self.distance(start_node1.index(), end_node1.index()) + self.distance(start_node2.index(), end_node2.index());
+                    let cost2 = self.distance(start_node1.index(), start_node2.index()) + self.distance(end_node1.index(), end_node2.index());
+                    if cost2 < cost1 {
+                        self.graph.remove_edge(edge1);
+                        self.graph.remove_edge(edge2);
+                        self.add_edge(start_node1.index(), start_node2.index());
+                        self.add_edge(end_node1.index(), end_node2.index());
+                        improved = true;
+                        //println!("Removed edges ({}, {}) and ({}, {}) and added edges ({}, {}) and ({}, {})", start_node1.index(), end_node1.index(), start_node2.index(), end_node2.index(), start_node1.index(), start_node2.index(), end_node1.index(), end_node2.index());
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn two_opt_swap(&mut self, i: usize, k: usize) {
+        let mut new_tour = Vec::new();
+        for j in 0..i {
+            new_tour.push(self.get_node(j));
+        }
+        for j in (i..k + 1).rev() {
+            new_tour.push(self.get_node(j));
+        }
+        for j in k + 1..self.nodes.len() {
+            new_tour.push(self.get_node(j));
+        }
+        // Create a new graph with the new tour
+        let mut new_graph: Graph<Node, ()> = Graph::new();
+        for node in new_tour.iter() {
+            new_graph.add_node(self.graph[*node].clone());
+        }
+        for i in 0..new_tour.len() {
+            new_graph.add_edge(new_tour[i], new_tour[(i + 1) % new_tour.len()], ());
+        }
+        self.graph = new_graph;
+    }
 }

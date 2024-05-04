@@ -72,12 +72,14 @@ fn generate_graph() -> Graph<Node, (), Directed> {
         Node { x: 35.0, y: 50.0 },
     ];
     let mut tour = Tour::new(nodes);
-    tour.nearest_neighbour_tour();
+    tour.random_tour();
+    tour.two_opt();
     tour.graph
 }
 
 fn generate_random_graph() -> Graph<Node, (), Directed> {
     let mut tour = Tour::create_random_nodes(100, 100.0, 100.0);
     tour.nearest_neighbour_tour();
+    tour.two_opt();
     tour.graph
 }
