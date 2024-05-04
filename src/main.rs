@@ -1,6 +1,4 @@
 use plotters::prelude::*;
-use petgraph::graph::Graph;
-use petgraph::Directed;
 use crate::tour::Tour;
 use crate::tour::Node;
 
@@ -11,13 +9,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let root = BitMapBackend::new("graph.png", (width, height)).into_drawing_area();
     root.fill(&WHITE)?;
 
-    let graph = generate_graph();
+    let route = generate_graph();
 
     // Find the minimum and maximum x and y values in the graph
-    let min_x = graph.node_indices().map(|i| graph[i].x).fold(f32::INFINITY, f32::min);
-    let max_x = graph.node_indices().map(|i| graph[i].x).fold(f32::NEG_INFINITY, f32::max);
-    let min_y = graph.node_indices().map(|i| graph[i].y).fold(f32::INFINITY, f32::min);
-    let max_y = graph.node_indices().map(|i| graph[i].y).fold(f32::NEG_INFINITY, f32::max);
+    let min_x = route.iter().map(|node| node.x).fold(f32::INFINITY, |a, b| a.min(b));
+    let max_x = route.iter().map(|node| node.x).fold(f32::NEG_INFINITY, |a, b| a.max(b));
+    let min_y = route.iter().map(|node| node.y).fold(f32::INFINITY, |a, b| a.min(b));
+    let max_y = route.iter().map(|node| node.y).fold(f32::NEG_INFINITY, |a, b| a.max(b));
 
     // Add a margin to the drawing area
     let margin = 40;
@@ -30,22 +28,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .y_label_area_size(30)
         .build_cartesian_2d(min_x..max_x, min_y..max_y)?;
 
-    for edge in graph.edge_indices() {
-        let (start_node, end_node) = graph.edge_endpoints(edge).unwrap();
-        let start_point = &graph[start_node];
-        let end_point = &graph[end_node];
-
+    for i in 0..route.len() - 1 {
         // Draw the edge as a line between the start node and the end node
         chart.draw_series(LineSeries::new(
-            vec![(start_point.x, start_point.y), (end_point.x, end_point.y)],
+            vec![(route[i].x, route[i].y), (route[i + 1].x, route[i + 1].y)],
             &BLACK,
         ))?;
     }
 
-    for (i, node) in graph.node_indices().enumerate() {
-        let point = &graph[node];
+    for node in route.iter() {
         chart.draw_series(PointSeries::of_element(
-            [(point.x, point.y)],
+            [(node.x, node.y)],
             5,
             ShapeStyle::from(&RED).filled(),
             &|coord, size, style| {
@@ -55,31 +48,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))?;
 
         // Add labels to the nodes
-        let label_coord = ((point.x - min_x) / (max_x - min_x) * drawing_width as f32 + margin as f32, (point.y - min_y) / (max_y - min_y) * drawing_height as f32 + margin as f32);
+        let label_coord = ((node.x - min_x) / (max_x - min_x) * drawing_width as f32 + margin as f32, (node.y - min_y) / (max_y - min_y) * drawing_height as f32 + margin as f32);
         let text_style = TextStyle::from(("Arial", 15).into_font()).color(&BLACK);
-        root.draw_text(&format!("Node {}", i), &text_style, (label_coord.0 as i32, (height as f32 - label_coord.1) as i32 - 20))?;
+        root.draw_text(&format!("Node {}", node.id), &text_style, (label_coord.0 as i32, (height as f32 - label_coord.1) as i32 - 20))?;
     }
 
     Ok(())
 }
 
-fn generate_graph() -> Graph<Node, (), Directed> {
+fn generate_graph() -> Vec<Node> {
     let nodes = vec![
-        Node { x: 0.0, y: 0.0 },
-        Node { x: 100.0, y: 50.0 },
-        Node { x: 50.0, y: 100.0 },
-        Node { x: 25.0, y: 25.0 },
-        Node { x: 35.0, y: 50.0 },
+        Node { id: 1, x: 0.0, y: 0.0 },
+        Node { id: 2, x: 100.0, y: 50.0 },
+        Node { id: 3, x: 50.0, y: 100.0 },
+        Node { id: 4, x: 25.0, y: 25.0 },
+        Node { id: 5, x: 35.0, y: 50.0 },
     ];
     let mut tour = Tour::new(nodes);
-    tour.random_tour();
-    tour.two_opt();
-    tour.graph
+    //tour.random_tour();
+    //tour.two_opt();
+    tour.route
 }
 
-fn generate_random_graph() -> Graph<Node, (), Directed> {
+fn generate_random_graph() -> Vec<Node> {
     let mut tour = Tour::create_random_nodes(100, 100.0, 100.0);
     tour.nearest_neighbour_tour();
-    tour.two_opt();
-    tour.graph
+    //tour.two_opt();
+    tour.route
 }

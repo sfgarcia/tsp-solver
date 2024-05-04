@@ -76,7 +76,7 @@ impl Tour {
         for node in self.nodes.iter() {
             visited.insert(node.id, false);
         }
-        visited[&current_index] = true;
+        visited.insert(current_index, true);
         for _ in 0..self.nodes.len() - 1 {
             let mut dist: Vec<f32> = self.distance[current_index].clone();
             for i in 0..self.nodes.len() {
@@ -86,7 +86,8 @@ impl Tour {
             }
             let min_index = dist.iter().enumerate().min_by(|x, y| x.1.partial_cmp(y.1).unwrap()).unwrap().0;
             route.push(self.nodes[min_index].clone());
-            visited[&min_index] = true;
+            // Mark the node as visited
+            visited.insert(min_index, true);
             current_index = min_index;
         }
         route.push(self.nodes[0].clone());
