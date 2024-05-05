@@ -57,7 +57,7 @@ impl Tour {
         }
     }
 
-    fn calculate_cost(&mut self) {
+    pub fn calculate_cost(&mut self) {
         let mut cost = 0.0;
         for i in 0..self.route.len() - 1 {
             cost += self.distance(&self.route[i], &self.route[i + 1]);
