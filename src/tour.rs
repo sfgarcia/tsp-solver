@@ -105,8 +105,10 @@ impl Tour {
             improved = false;
             for i in 1..self.route.len() - 2 {
                 for k in i + 1..self.route.len() - 1 {
-                    let delta = self.distance(&self.route[i - 1], &self.route[i]) + self.distance(&self.route[k], &self.route[k + 1]) - self.distance(&self.route[i - 1], &self.route[k]) - self.distance(&self.route[i], &self.route[k + 1]);
-                    if delta < 0.0 {
+                    let old_distance = self.distance(&self.route[i - 1], &self.route[i]) + self.distance(&self.route[k], &self.route[k + 1]);
+                    let new_distance = self.distance(&self.route[i - 1], &self.route[k]) + self.distance(&self.route[i], &self.route[k + 1]);
+                    let delta = old_distance - new_distance;
+                    if delta > 0.0 {
                         let new_route = self.route[0..i].to_vec()
                             .into_iter()
                             .chain(self.route[i..k + 1].to_vec().into_iter().rev())
@@ -120,27 +122,4 @@ impl Tour {
         }
     }
 
-    /*
-    pub fn two_opt_swap(&mut self, i: usize, k: usize) {
-        let mut new_tour = Vec::new();
-        for j in 0..i {
-            new_tour.push(self.get_node(j));
-        }
-        for j in (i..k + 1).rev() {
-            new_tour.push(self.get_node(j));
-        }
-        for j in k + 1..self.nodes.len() {
-            new_tour.push(self.get_node(j));
-        }
-        // Create a new graph with the new tour
-        let mut new_graph: Graph<Node, ()> = Graph::new();
-        for node in new_tour.iter() {
-            new_graph.add_node(self.graph[*node].clone());
-        }
-        for i in 0..new_tour.len() {
-            new_graph.add_edge(new_tour[i], new_tour[(i + 1) % new_tour.len()], ());
-        }
-        self.graph = new_graph;
-    }
-     */
 }
