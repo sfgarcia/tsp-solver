@@ -100,13 +100,14 @@ impl Tour {
     }
 
     pub fn two_opt(&mut self) {
+        self.distance_matrix();
         let mut improved = true;
         while improved {
             improved = false;
             for i in 1..self.route.len() - 2 {
                 for k in i + 1..self.route.len() - 1 {
-                    let old_distance = self.distance(&self.route[i - 1], &self.route[i]) + self.distance(&self.route[k], &self.route[k + 1]);
-                    let new_distance = self.distance(&self.route[i - 1], &self.route[k]) + self.distance(&self.route[i], &self.route[k + 1]);
+                    let old_distance = self.distance[self.route[i - 1].id][self.route[i].id] + self.distance[self.route[k].id][self.route[k + 1].id];
+                    let new_distance = self.distance[self.route[i - 1].id][self.route[k].id] + self.distance[self.route[i].id][self.route[k + 1].id];
                     let delta = old_distance - new_distance;
                     if delta > 0.0 {
                         let new_route = self.route[0..i].to_vec()
