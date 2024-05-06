@@ -1,0 +1,5 @@
+TODO
+
+- Agregar opción de setear una semilla para la generación de los nodos aleatorios
+- Refactorizar la visualización y llevarla a una clase aparte
+- Implementar Lin Kernighan

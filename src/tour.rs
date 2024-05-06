@@ -46,6 +46,12 @@ impl Tour {
     }
 
     fn distance(&self, node_1: &Node, node_2: &Node) -> f32 {
+        if self.distance[node_1.id][node_2.id] != 0.0 {
+            return self.distance[node_1.id][node_2.id];
+        }
+        else if self.distance[node_2.id][node_1.id] != 0.0 {
+            return self.distance[node_2.id][node_1.id];
+        }
         ((node_1.x - node_2.x).powi(2) + (node_1.y - node_2.y).powi(2)).sqrt()
     }
 
