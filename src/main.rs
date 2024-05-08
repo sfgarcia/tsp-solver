@@ -3,8 +3,10 @@ use plotters::coord::types::RangedCoordf32;
 use plotters::prelude::*;
 use crate::tour::Tour;
 use crate::tour::Node;
+use crate::visualization::Visualization;
 
 pub mod tour;
+pub mod visualization;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (width, height) = (640, 480);
