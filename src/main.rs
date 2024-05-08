@@ -1,3 +1,5 @@
+use plotters::backend::RGBPixel;
+use plotters::coord::types::RangedCoordf32;
 use plotters::prelude::*;
 use crate::tour::Tour;
 use crate::tour::Node;
@@ -28,13 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .y_label_area_size(30)
         .build_cartesian_2d(min_x..max_x, min_y..max_y)?;
 
-    for i in 0..route.len() - 1 {
-        // Draw the edge as a line between the start node and the end node
-        chart.draw_series(LineSeries::new(
-            vec![(route[i].x, route[i].y), (route[i + 1].x, route[i + 1].y)],
-            &BLACK,
-        ))?;
-    }
+    draw_edges(&mut chart, &route)?;
 
     for node in route.iter() {
         chart.draw_series(PointSeries::of_element(
@@ -56,6 +52,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn draw_edges(chart: &mut ChartContext<BitMapBackend<RGBPixel>, Cartesian2d<RangedCoordf32, RangedCoordf32>>, route: &Vec<Node>) -> Result<(), Box<dyn std::error::Error>> {
+    for i in 0..route.len() - 1 {
+        // Draw the edge as a line between the start node and the end node
+        chart.draw_series(LineSeries::new(
+            vec![(route[i].x, route[i].y), (route[i + 1].x, route[i + 1].y)],
+            &BLACK,
+        ))?;
+    }
+    Ok(())
+}
+
 fn generate_graph() -> Vec<Node> {
     let nodes = vec![
         (0.0, 0.0),
@@ -72,7 +79,7 @@ fn generate_graph() -> Vec<Node> {
 }
 
 fn generate_random_graph() -> Vec<Node> {
-    let mut tour = Tour::create_random_nodes(500, 100.0, 100.0);
+    let mut tour = Tour::create_random_nodes(10, 100.0, 100.0);
     //tour.nearest_neighbour_tour();
     tour.two_opt();
     tour.route
