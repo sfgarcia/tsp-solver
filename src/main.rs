@@ -1,11 +1,11 @@
-use crate::tour::Tour;
 use crate::tour::Node;
+use crate::tour::Tour;
 use crate::visualization::plot_route;
 
 pub mod tour;
 pub mod visualization;
 
-fn main(){
+fn main() {
     let route = generate_random_graph();
     let _ = plot_route(&route, 640, 480, "graph.png");
 }
