@@ -5,7 +5,6 @@ use axum::response::Response;
 use axum::http::{header, StatusCode};
 use axum::body::Body;
 use crate::handlers::{AppState, SharedState};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -18,10 +17,10 @@ async fn main() {
     let icon     = include_str!("../static/icon.svg");
 
     // Load cache from disk (if it exists)
-    let initial_cache = handlers::load_cache_from_disk().await;
+    let initial_communes = handlers::load_cache_from_disk().await;
 
     let state: SharedState = Arc::new(AppState {
-        cache: RwLock::new(initial_cache),
+        communes: RwLock::new(initial_communes),
         client: reqwest::Client::builder()
             .timeout(Duration::from_secs(12))
             .build()

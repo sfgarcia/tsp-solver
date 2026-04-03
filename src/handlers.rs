@@ -31,16 +31,16 @@ fn is_valid_coord(lat: f64, lng: f64) -> bool {
 
 // ── Cache persistence ─────────────────────────────────────────────────────────
 
-pub type CacheMap = HashMap<String, (Vec<Bencinera>, u64)>;
+pub type CommuneStore = HashMap<String, (Vec<Bencinera>, u64)>;
 
-pub async fn load_cache_from_disk() -> CacheMap {
+pub async fn load_cache_from_disk() -> CommuneStore {
     match tokio::fs::read_to_string(CACHE_FILE).await {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-        Err(_) => CacheMap::new(),
+        Err(_) => CommuneStore::new(),
     }
 }
 
-async fn save_cache_to_disk(snapshot: CacheMap) {
+async fn save_cache_to_disk(snapshot: CommuneStore) {
     if let Ok(json) = serde_json::to_string(&snapshot) {
         let _ = tokio::fs::write(CACHE_FILE, json).await;
     }
@@ -49,7 +49,7 @@ async fn save_cache_to_disk(snapshot: CacheMap) {
 // ── Application State ──────────────────────────────────────────────────────────
 
 pub struct AppState {
-    pub cache: RwLock<CacheMap>,
+    pub communes: RwLock<CommuneStore>,
     pub client: reqwest::Client,
 }
 
@@ -73,29 +73,36 @@ pub struct Bencinera {
     pub direccion: String,
 }
 
-pub async fn bencineras(
-    State(state): State<SharedState>,
-    Query(b): Query<BoundsQuery>,
-) -> impl IntoResponse {
-    // Validate bounds
-    if !is_valid_coord(b.south, b.west) || !is_valid_coord(b.north, b.east) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "Invalid bounds." }))).into_response();
-    }
+// ── Helpers for Overpass parsing ───────────────────────────────────────────────
 
-    let key = format!("{:.2}:{:.2}:{:.2}:{:.2}", b.south, b.north, b.west, b.east);
-    {
-        let guard = state.cache.read().await;
-        if let Some((data, ts)) = guard.get(&key) {
-            if is_fresh(*ts) {
-                return (StatusCode::OK, Json(data.clone())).into_response();
-            }
-        }
-    }
+fn parse_bencinera(e: &serde_json::Value) -> Option<Bencinera> {
+    let lat = e["lat"].as_f64()?;
+    let lng = e["lon"].as_f64()?;
+    let tags = &e["tags"];
+    let nombre = tags["name"].as_str()
+        .or_else(|| tags["brand"].as_str())
+        .unwrap_or("Bencinera")
+        .to_string();
+    let direccion = tags["addr:street"].as_str()
+        .map(|s| {
+            let num = tags["addr:housenumber"].as_str().unwrap_or("");
+            if num.is_empty() { s.to_string() } else { format!("{} {}", s, num) }
+        })
+        .unwrap_or_default();
+    Some(Bencinera { lat, lng, nombre, direccion })
+}
 
-    // Overpass API: amenity=fuel dentro del bounding box
+// ── Overpass API functions ──────────────────────────────────────────────────────
+
+async fn fetch_communes_in_bbox(
+    client: &reqwest::Client,
+    south: f64, north: f64, west: f64, east: f64,
+) -> Vec<String> {
     let query = format!(
-        "[out:json][timeout:10];node[\"amenity\"=\"fuel\"]({},{},{},{});out;",
-        b.south, b.west, b.north, b.east
+        "[out:json][timeout:10];\
+         rel[\"boundary\"=\"administrative\"][\"admin_level\"=\"8\"]({},{},{},{});\
+         out center;",
+        south, west, north, east
     );
 
     let mirrors = [
@@ -104,72 +111,190 @@ pub async fn bencineras(
         "https://overpass.private.coffee/api/interpreter",
     ];
 
-    let mut raw: Option<serde_json::Value> = None;
+    for mirror in &mirrors {
+        let Ok(resp) = client.get(*mirror).query(&[("data", &query)]).send().await else {
+            continue;
+        };
+        let Ok(text) = resp.text().await else { continue };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+
+        if let Some(elements) = json["elements"].as_array() {
+            return elements
+                .iter()
+                .filter_map(|e| e["tags"]["name"].as_str().map(String::from))
+                .collect();
+        }
+    }
+
+    Vec::new()
+}
+
+async fn fetch_bencineras_for_commune(
+    client: &reqwest::Client,
+    commune_name: &str,
+) -> Option<Vec<Bencinera>> {
+    let escaped_name = commune_name.replace('"', "\\\"");
+    let query = format!(
+        "[out:json][timeout:30];\
+         area[\"name\"=\"{}\"][\"boundary\"=\"administrative\"][\"admin_level\"=\"8\"]->.a;\
+         node[\"amenity\"=\"fuel\"](area.a);\
+         out;",
+        escaped_name
+    );
+
+    let mirrors = [
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    ];
 
     for mirror in &mirrors {
-        let result = state.client
-            .get(*mirror)
-            .query(&[("data", &query)])
-            .send()
-            .await;
+        let Ok(resp) = client.get(*mirror).query(&[("data", &query)]).send().await else {
+            continue;
+        };
+        let Ok(text) = resp.text().await else { continue };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
 
-        if let Ok(resp) = result {
-            let text = resp.text().await.unwrap_or_default();
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                if json["elements"].is_array() {
-                    raw = Some(json);
-                    break;
+        if let Some(elements) = json["elements"].as_array() {
+            let bencineras: Vec<Bencinera> = elements
+                .iter()
+                .filter_map(parse_bencinera)
+                .collect();
+            return Some(bencineras);
+        }
+    }
+
+    None
+}
+
+async fn fetch_bencineras_bbox_direct(
+    client: &reqwest::Client,
+    south: f64, north: f64, west: f64, east: f64,
+) -> Option<Vec<Bencinera>> {
+    let query = format!(
+        "[out:json][timeout:10];node[\"amenity\"=\"fuel\"]({},{},{},{});out;",
+        south, west, north, east
+    );
+
+    let mirrors = [
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    ];
+
+    for mirror in &mirrors {
+        let Ok(resp) = client.get(*mirror).query(&[("data", &query)]).send().await else {
+            continue;
+        };
+        let Ok(text) = resp.text().await else { continue };
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
+
+        if let Some(elements) = json["elements"].as_array() {
+            let bencineras: Vec<Bencinera> = elements
+                .iter()
+                .filter_map(parse_bencinera)
+                .collect();
+            return Some(bencineras);
+        }
+    }
+
+    None
+}
+
+pub async fn bencineras(
+    State(state): State<SharedState>,
+    Query(b): Query<BoundsQuery>,
+) -> impl IntoResponse {
+    // ── 1. Validate bounds ──────────────────────────────────────────────────
+    if !is_valid_coord(b.south, b.west) || !is_valid_coord(b.north, b.east) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "Invalid bounds." }))).into_response();
+    }
+
+    // ── 2. Discover communes in bbox ────────────────────────────────────────
+    let communes_in_bbox = fetch_communes_in_bbox(
+        &state.client, b.south, b.north, b.west, b.east
+    ).await;
+
+    // ── 3. Fallback if no communes ──────────────────────────────────────────
+    if communes_in_bbox.is_empty() {
+        return match fetch_bencineras_bbox_direct(
+            &state.client, b.south, b.north, b.west, b.east
+        ).await {
+            Some(bencineras) => (StatusCode::OK, Json(bencineras)).into_response(),
+            None => (StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "error": "Overpass API unavailable." }))).into_response(),
+        };
+    }
+
+    // ── 4. Classify communes: cache hit vs need fetch ───────────────────────
+    let mut all_bencineras: Vec<Bencinera> = Vec::new();
+    let mut communes_to_fetch: Vec<String> = Vec::new();
+
+    {
+        let guard = state.communes.read().await;
+        for commune in &communes_in_bbox {
+            match guard.get(commune) {
+                Some((data, ts)) if is_fresh(*ts) => {
+                    all_bencineras.extend_from_slice(data);
+                }
+                _ => {
+                    communes_to_fetch.push(commune.clone());
                 }
             }
         }
     }
 
-    let raw = match raw {
-        Some(v) => v,
-        None => return (
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": "Overpass API unavailable." })),
-        ).into_response(),
-    };
+    // ── 5. Fetch missing communes (parallelized) ────────────────────────────
+    let mut newly_fetched: Vec<(String, Vec<Bencinera>)> = Vec::new();
 
-    let elements = match raw["elements"].as_array() {
-        Some(a) => a,
-        None => return (StatusCode::OK, Json(serde_json::json!([]))).into_response(),
-    };
-
-    let bencineras: Vec<Bencinera> = elements
-        .iter()
-        .filter_map(|e| {
-            let lat = e["lat"].as_f64()?;
-            let lng = e["lon"].as_f64()?;
-            let tags = &e["tags"];
-            let nombre = tags["name"].as_str()
-                .or_else(|| tags["brand"].as_str())
-                .unwrap_or("Bencinera")
-                .to_string();
-            let direccion = tags["addr:street"].as_str()
-                .map(|s| {
-                    let num = tags["addr:housenumber"].as_str().unwrap_or("");
-                    if num.is_empty() { s.to_string() } else { format!("{} {}", s, num) }
+    if !communes_to_fetch.is_empty() {
+        let handles: Vec<_> = communes_to_fetch
+            .iter()
+            .map(|commune| {
+                let client = state.client.clone();
+                let commune = commune.clone();
+                tokio::spawn(async move {
+                    let result = fetch_bencineras_for_commune(&client, &commune).await;
+                    (commune, result)
                 })
-                .unwrap_or_default();
-            Some(Bencinera { lat, lng, nombre, direccion })
-        })
-        .collect();
+            })
+            .collect();
 
-    {
-        let mut guard = state.cache.write().await;
-        // Evict stale entries before inserting new one
-        guard.retain(|_, (_, ts)| is_fresh(*ts));
-        guard.insert(key, (bencineras.clone(), now_unix()));
+        for handle in handles {
+            if let Ok((commune, Some(bencineras))) = handle.await {
+                all_bencineras.extend_from_slice(&bencineras);
+                newly_fetched.push((commune, bencineras));
+            }
+        }
+    }
 
-        // Spawn background task to persist cache to disk
+    // ── 6. Persist new entries to cache ─────────────────────────────────────
+    if !newly_fetched.is_empty() {
+        let mut guard = state.communes.write().await;
+        let ts = now_unix();
+        guard.retain(|_, (_, t)| is_fresh(*t));
+        for (commune, bencineras) in newly_fetched {
+            guard.insert(commune, (bencineras, ts));
+        }
         let snapshot = guard.clone();
         tokio::spawn(async move {
             save_cache_to_disk(snapshot).await;
         });
     }
-    (StatusCode::OK, Json(bencineras)).into_response()
+
+    // ── 7. Dedup by position ────────────────────────────────────────────────
+    all_bencineras.sort_by(|a, b| {
+        a.lat.partial_cmp(&b.lat).unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.lng.partial_cmp(&b.lng).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    all_bencineras.dedup_by(|a, b| a.lat == b.lat && a.lng == b.lng);
+
+    // ── 8. Filter to bbox ───────────────────────────────────────────────────
+    all_bencineras.retain(|item| {
+        item.lat >= b.south && item.lat <= b.north
+            && item.lng >= b.west && item.lng <= b.east
+    });
+
+    (StatusCode::OK, Json(all_bencineras)).into_response()
 }
 
 #[derive(Deserialize)]
