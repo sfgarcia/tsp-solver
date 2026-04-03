@@ -42,7 +42,7 @@ pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
 
     let result = tokio::task::spawn_blocking(move || {
         let mut tour = Tour::new(positions);
-        tour.nearest_neighbour_tour();
+        tour.random_tour();
         tour.two_opt();
         tour.or_opt();
         tour.calculate_cost();
