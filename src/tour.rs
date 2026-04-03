@@ -31,6 +31,25 @@ impl Tour {
         Self { route, nodes, cost: 0.0, distance }
     }
 
+    /// Constructs a Tour with a pre-built NxN distance/time matrix.
+    /// Use this when distances come from an external source (e.g. OSRM road times in seconds).
+    /// The matrix bypasses haversine entirely — all solver algorithms use it directly.
+    pub fn with_matrix(positions: Vec<(f32, f32)>, matrix: Vec<Vec<f32>>) -> Self {
+        assert!(!positions.is_empty(), "Tour requires at least one node");
+        let n = positions.len();
+        let distance = matrix.iter()
+            .map(|row| row.iter().map(|&v| Some(v)).collect())
+            .collect();
+        let mut nodes = Vec::with_capacity(n);
+        let mut route = Vec::with_capacity(n + 1);
+        for (id, &(x, y)) in positions.iter().enumerate() {
+            nodes.push(Node { id, x, y });
+            route.push(Node { id, x, y });
+        }
+        route.push(route[0].clone());
+        Self { route, nodes, cost: 0.0, distance }
+    }
+
     pub fn create_random_nodes(n: usize, width: f32, height: f32) -> Self {
         let mut rng = rand::thread_rng();
         let mut nodes: Vec<Node> = Vec::new();
@@ -478,5 +497,131 @@ mod tests {
     fn tour_new_empty_positions_panics() {
         let positions: Vec<(f32, f32)> = vec![];
         Tour::new(positions);
+    }
+
+    // ── Tour::with_matrix Tests ───────────────────────────────────────────────
+
+    #[test]
+    fn with_matrix_should_create_closed_loop() {
+        let positions = vec![(0.0f32, 0.0), (10.0, 0.0), (5.0, 5.0)];
+        let matrix = vec![
+            vec![0.0f32, 100.0, 150.0],
+            vec![100.0,    0.0, 120.0],
+            vec![150.0,  120.0,   0.0],
+        ];
+        let tour = Tour::with_matrix(positions, matrix);
+        assert_eq!(tour.route.first().unwrap().id, tour.route.last().unwrap().id);
+    }
+
+    #[test]
+    fn with_matrix_should_have_n_plus_one_route_length() {
+        let positions = vec![(0.0f32, 0.0), (1.0, 0.0), (0.5, 0.5)];
+        let matrix = vec![vec![0.0f32; 3]; 3];
+        let tour = Tour::with_matrix(positions, matrix);
+        assert_eq!(tour.route.len(), 4);
+    }
+
+    #[test]
+    fn with_matrix_should_use_provided_distances_not_haversine() {
+        // Nearby points — haversine would give ~0.15 km, matrix gives 999.0
+        let positions = vec![(0.0f32, 0.0), (0.001, 0.001), (0.002, 0.002)];
+        let matrix = vec![
+            vec![  0.0f32, 999.0, 500.0],
+            vec![999.0,      0.0, 300.0],
+            vec![500.0,    300.0,   0.0],
+        ];
+        let mut tour = Tour::with_matrix(positions, matrix);
+        tour.distance_matrix(); // should be no-op — already populated
+        assert!((tour.distance[0][1].unwrap() - 999.0).abs() < 0.01,
+            "expected 999.0, got {:?}", tour.distance[0][1]);
+    }
+
+    #[test]
+    fn with_matrix_cost_should_sum_matrix_values() {
+        // Route order 0→1→2→0: 100 + 200 + 150 = 450
+        let positions = vec![(0.0f32, 0.0), (1.0, 0.0), (0.5, 0.5)];
+        let matrix = vec![
+            vec![  0.0f32, 100.0, 150.0],
+            vec![100.0,      0.0, 200.0],
+            vec![150.0,    200.0,   0.0],
+        ];
+        let mut tour = Tour::with_matrix(positions, matrix);
+        tour.calculate_cost();
+        assert!((tour.cost - 450.0).abs() < 0.01, "expected 450.0, got {}", tour.cost);
+    }
+
+    #[test]
+    fn with_matrix_should_handle_asymmetric_distances() {
+        // Road times: 0→1 = 60s, 1→0 = 90s (one-way speed difference)
+        let positions = vec![(0.0f32, 0.0), (1.0, 0.0), (0.5, 0.5)];
+        let matrix = vec![
+            vec![ 0.0f32,  60.0, 120.0],
+            vec![90.0,      0.0,  80.0],
+            vec![100.0,    70.0,   0.0],
+        ];
+        let tour = Tour::with_matrix(positions, matrix);
+        assert!((tour.distance[0][1].unwrap() - 60.0).abs() < 0.01);
+        assert!((tour.distance[1][0].unwrap() - 90.0).abs() < 0.01);
+        assert_ne!(tour.distance[0][1], tour.distance[1][0],
+            "asymmetric matrix should preserve direction");
+    }
+
+    #[test]
+    fn with_matrix_should_handle_unreachable_pairs_as_max() {
+        let positions = vec![(0.0f32, 0.0), (1.0, 0.0), (0.5, 0.5)];
+        let matrix = vec![
+            vec![    0.0f32, f32::MAX, 100.0],
+            vec![f32::MAX,       0.0, 200.0],
+            vec![   100.0,     200.0,   0.0],
+        ];
+        let tour = Tour::with_matrix(positions, matrix);
+        assert_eq!(tour.distance[0][1], Some(f32::MAX));
+    }
+
+    #[test]
+    fn with_matrix_nearest_neighbour_should_visit_all_nodes() {
+        let positions = vec![(0.0f32, 0.0), (1.0, 0.0), (2.0, 0.0), (3.0, 0.0)];
+        let n = positions.len();
+        let mut matrix = vec![vec![f32::MAX; n]; n];
+        for i in 0..n { matrix[i][i] = 0.0; }
+        matrix[0][1] = 10.0; matrix[1][0] = 10.0;
+        matrix[1][2] = 20.0; matrix[2][1] = 20.0;
+        matrix[2][3] = 15.0; matrix[3][2] = 15.0;
+        matrix[0][3] = 50.0; matrix[3][0] = 50.0;
+        matrix[0][2] = 30.0; matrix[2][0] = 30.0;
+        matrix[1][3] = 35.0; matrix[3][1] = 35.0;
+        let mut tour = Tour::with_matrix(positions, matrix);
+        tour.nearest_neighbour_tour();
+        assert_eq!(tour.route.len(), n + 1);
+        let mut seen = vec![false; n];
+        for node in &tour.route[..n] { seen[node.id] = true; }
+        assert!(seen.iter().all(|&v| v), "not all nodes visited");
+    }
+
+    #[test]
+    fn with_matrix_two_opt_should_not_worsen_cost() {
+        let positions = vec![(0.0f32, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let n = positions.len();
+        let mut matrix = vec![vec![0.0f32; n]; n];
+        matrix[0][1] = 10.0; matrix[1][0] = 10.0;
+        matrix[1][2] = 10.0; matrix[2][1] = 10.0;
+        matrix[2][3] = 10.0; matrix[3][2] = 10.0;
+        matrix[3][0] = 10.0; matrix[0][3] = 10.0;
+        matrix[0][2] = 50.0; matrix[2][0] = 50.0;
+        matrix[1][3] = 50.0; matrix[3][1] = 50.0;
+        let mut tour = Tour::with_matrix(positions, matrix);
+        tour.nearest_neighbour_tour();
+        tour.calculate_cost();
+        let cost_before = tour.cost;
+        tour.two_opt();
+        tour.calculate_cost();
+        assert!(tour.cost <= cost_before + 0.01,
+            "two_opt worsened cost: {} → {}", cost_before, tour.cost);
+    }
+
+    #[test]
+    #[should_panic(expected = "Tour requires at least one node")]
+    fn with_matrix_should_panic_on_empty_positions() {
+        Tour::with_matrix(vec![], vec![]);
     }
 }

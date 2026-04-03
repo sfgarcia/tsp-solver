@@ -9,11 +9,16 @@ use crate::tour::Tour;
 
 const MAX_NODES: usize = 200;
 const SOLVER_TIMEOUT_SECS: u64 = 30;
+const OSRM_TIMEOUT_SECS: u64 = 10;
+const OSRM_MAX_COORDS: usize = 100; // public demo server limit
+const OSRM_BASE: &str = "http://router.project-osrm.org/table/v1/driving";
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
 fn is_valid_coord(lat: f64, lng: f64) -> bool {
-    lat.is_finite() && lng.is_finite() && lat >= -90.0 && lat <= 90.0 && lng >= -180.0 && lng <= 180.0
+    lat.is_finite() && lng.is_finite()
+        && (-90.0..=90.0).contains(&lat)
+        && (-180.0..=180.0).contains(&lng)
 }
 
 // ── Application State ──────────────────────────────────────────────────────────
@@ -88,6 +93,38 @@ pub async fn login_cne(client: &reqwest::Client, email: &str, password: &str) ->
 
     let json: serde_json::Value = resp.json().await.ok()?;
     json["token"].as_str().map(|s| s.to_string())
+}
+
+// ── OSRM Road-Time Matrix ─────────────────────────────────────────────────────
+
+/// Parses the `durations` array from an OSRM table response into an NxN matrix (seconds).
+/// Returns `None` if the key is missing or the structure is malformed.
+/// Unreachable pairs (JSON `null`) become `f32::MAX`.
+fn parse_osrm_durations(body: &serde_json::Value) -> Option<Vec<Vec<f32>>> {
+    body["durations"].as_array()?.iter().map(|row| {
+        row.as_array().map(|r| {
+            // null entries (unreachable pairs) become f32::MAX — not f64::MAX as f32 which overflows to inf
+            r.iter().map(|v| v.as_f64().map_or(f32::MAX, |x| x as f32)).collect()
+        })
+    }).collect()
+}
+
+/// Fetches an NxN travel-time matrix (seconds) from the OSRM public table API.
+/// Returns `None` on timeout, HTTP error, or malformed response — caller falls back to haversine.
+async fn fetch_osrm_matrix(client: &reqwest::Client, coords: &[(f64, f64)]) -> Option<Vec<Vec<f32>>> {
+    // OSRM expects lng,lat order
+    let coord_str = coords.iter()
+        .map(|(lat, lng)| format!("{},{}", lng, lat))
+        .collect::<Vec<_>>()
+        .join(";");
+    let url = format!("{}/{}?annotations=duration", OSRM_BASE, coord_str);
+    let resp = tokio::time::timeout(
+        Duration::from_secs(OSRM_TIMEOUT_SECS),
+        client.get(&url).send(),
+    ).await.ok()?.ok()?;
+    if !resp.status().is_success() { return None; }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    parse_osrm_durations(&body)
 }
 
 pub async fn fetch_cne_stations(client: &reqwest::Client, token: &str) -> Vec<CneStation> {
@@ -203,7 +240,12 @@ pub struct SolveRequest {
 #[derive(Serialize)]
 pub struct SolveResponse {
     pub route: Vec<RoutePoint>,
-    pub total_distance_km: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_distance_km: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_travel_time_secs: Option<f32>,
+    /// "osrm" when road times were used, "haversine" on fallback
+    pub routing: &'static str,
 }
 
 #[derive(Serialize)]
@@ -212,7 +254,10 @@ pub struct RoutePoint {
     pub lng: f64,
 }
 
-pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
+pub async fn solve(
+    State(state): State<SharedState>,
+    Json(payload): Json<SolveRequest>,
+) -> impl IntoResponse {
     if payload.coordinates.len() < 3 {
         return (
             StatusCode::BAD_REQUEST,
@@ -243,10 +288,22 @@ pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
         .map(|c| (c.lat as f32, c.lng as f32))
         .collect();
 
+    let coords: Vec<(f64, f64)> = payload.coordinates.iter().map(|c| (c.lat, c.lng)).collect();
+    let osrm_matrix = if coords.len() <= OSRM_MAX_COORDS {
+        fetch_osrm_matrix(&state.client, &coords).await
+    } else {
+        None
+    };
+    let use_osrm = osrm_matrix.is_some();
+
     let result = tokio::time::timeout(
         Duration::from_secs(SOLVER_TIMEOUT_SECS),
         tokio::task::spawn_blocking(move || {
-            let mut tour = Tour::new(positions);
+            let mut tour = if let Some(matrix) = osrm_matrix {
+                Tour::with_matrix(positions, matrix)
+            } else {
+                Tour::new(positions)
+            };
             tour.nearest_neighbour_tour();
             tour.two_opt();
             tour.or_opt();
@@ -280,12 +337,15 @@ pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
         .map(|n| RoutePoint { lat: n.x as f64, lng: n.y as f64 })
         .collect();
 
+    let (total_distance_km, total_travel_time_secs, routing) = if use_osrm {
+        (None, Some(tour.cost), "osrm")
+    } else {
+        (Some(tour.cost), None, "haversine")
+    };
+
     (
         StatusCode::OK,
-        Json(serde_json::json!({
-            "route": route,
-            "total_distance_km": tour.cost
-        })),
+        Json(SolveResponse { route, total_distance_km, total_travel_time_secs, routing }),
     )
         .into_response()
 }
@@ -293,6 +353,61 @@ pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── parse_osrm_durations Tests ────────────────────────────────────────────
+
+    #[test]
+    fn parse_osrm_durations_should_return_matrix_from_valid_response() {
+        let body = serde_json::json!({
+            "durations": [[0.0, 120.5, 300.0], [130.0, 0.0, 180.0], [310.0, 185.0, 0.0]]
+        });
+        let matrix = parse_osrm_durations(&body).unwrap();
+        assert_eq!(matrix.len(), 3);
+        assert!((matrix[0][1] - 120.5).abs() < 0.01, "expected 120.5, got {}", matrix[0][1]);
+    }
+
+    #[test]
+    fn parse_osrm_durations_should_preserve_asymmetry() {
+        let body = serde_json::json!({
+            "durations": [[0.0, 120.5, 300.0], [130.0, 0.0, 180.0], [310.0, 185.0, 0.0]]
+        });
+        let matrix = parse_osrm_durations(&body).unwrap();
+        assert!((matrix[0][1] - 120.5).abs() < 0.01);
+        assert!((matrix[1][0] - 130.0).abs() < 0.01);
+        assert_ne!(matrix[0][1], matrix[1][0], "asymmetric values should differ");
+    }
+
+    #[test]
+    fn parse_osrm_durations_should_coerce_null_to_max() {
+        let body = serde_json::json!({
+            "durations": [[0.0, null], [null, 0.0]]
+        });
+        let matrix = parse_osrm_durations(&body).unwrap();
+        assert_eq!(matrix[0][1], f32::MAX);
+        assert_eq!(matrix[1][0], f32::MAX);
+    }
+
+    #[test]
+    fn parse_osrm_durations_should_return_none_when_key_missing() {
+        let body = serde_json::json!({ "code": "Ok" });
+        assert!(parse_osrm_durations(&body).is_none());
+    }
+
+    #[test]
+    fn parse_osrm_durations_should_return_none_on_empty_object() {
+        let body = serde_json::json!({});
+        assert!(parse_osrm_durations(&body).is_none());
+    }
+
+    #[test]
+    fn parse_osrm_durations_should_preserve_matrix_dimensions() {
+        let body = serde_json::json!({
+            "durations": [[0.0, 1.0, 2.0], [3.0, 0.0, 4.0], [5.0, 6.0, 0.0]]
+        });
+        let matrix = parse_osrm_durations(&body).unwrap();
+        assert_eq!(matrix.len(), 3);
+        assert!(matrix.iter().all(|row| row.len() == 3));
+    }
 
     #[test]
     fn is_valid_coord_valid_cases() {
