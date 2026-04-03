@@ -122,6 +122,26 @@ pub async fn status(State(state): State<SharedState>) -> impl IntoResponse {
     Json(serde_json::json!({ "cne_stations": count }))
 }
 
+pub async fn debug_cne(State(state): State<SharedState>) -> impl IntoResponse {
+    let resp = state.client
+        .get("https://api.cne.cl/api/v4/estaciones")
+        .bearer_auth("test")
+        .send()
+        .await;
+
+    match resp {
+        Ok(r) => {
+            let status = r.status().as_u16();
+            let body = r.text().await.unwrap_or_default();
+            Json(serde_json::json!({
+                "http_status": status,
+                "body_preview": &body[..body.len().min(200)]
+            }))
+        }
+        Err(e) => Json(serde_json::json!({ "error": e.to_string() })),
+    }
+}
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 pub async fn bencineras(
