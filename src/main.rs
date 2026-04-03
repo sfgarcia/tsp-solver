@@ -4,9 +4,10 @@ pub mod tour;
 use axum::response::Response;
 use axum::http::{header, StatusCode};
 use axum::body::Body;
-use crate::handlers::BencineraCache;
+use crate::handlers::{AppState, SharedState};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 #[tokio::main]
@@ -16,7 +17,13 @@ async fn main() {
     let sw       = include_str!("../static/sw.js");
     let icon     = include_str!("../static/icon.svg");
 
-    let bencinera_cache: BencineraCache = Arc::new(RwLock::new(HashMap::new()));
+    let state: SharedState = Arc::new(AppState {
+        cache: RwLock::new(HashMap::new()),
+        client: reqwest::Client::builder()
+            .timeout(Duration::from_secs(12))
+            .build()
+            .unwrap(),
+    });
 
     let app = axum::Router::new()
         .route("/", axum::routing::get(move || async move {
@@ -45,7 +52,7 @@ async fn main() {
         }))
         .route("/solve", axum::routing::post(handlers::solve))
         .route("/bencineras", axum::routing::get(handlers::bencineras))
-        .with_state(bencinera_cache)
+        .with_state(state)
         .layer(tower_http::cors::CorsLayer::permissive());
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());

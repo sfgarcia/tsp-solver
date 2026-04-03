@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rustc --version)",
+      "Skill(git-commit)",
+      "mcp__puppeteer__puppeteer_screenshot",
+      "Bash(netstat -ano)",
+      "Bash(xargs -r taskkill //F //PID)",
+      "Bash(taskkill //F //IM tsp-solver.exe)",
+      "Bash(./target/debug/tsp-solver.exe)",
+      "Bash(python3 -m json.tool)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'Total: {len\\(d[\\\\\"elements\\\\\"]\\)} bencineras'\\); print\\(json.dumps\\(d['elements'][0], indent=2\\)\\)\")",
+      "mcp__puppeteer__puppeteer_click",
+      "Bash(./target/debug/tsp-solver)"
+    ]
+  }
+}

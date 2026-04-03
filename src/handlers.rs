@@ -6,9 +6,28 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use crate::tour::Tour;
 
-// ── Bencineras ────────────────────────────────────────────────────────────────
+// ── Constants ──────────────────────────────────────────────────────────────────
 
-pub type BencineraCache = Arc<RwLock<HashMap<String, (Vec<Bencinera>, Instant)>>>;
+const MAX_NODES: usize = 200;
+const SOLVER_TIMEOUT_SECS: u64 = 30;
+const BENCINERA_TTL_SECS: u64 = 86400;
+
+// ── Validation ────────────────────────────────────────────────────────────────
+
+fn is_valid_coord(lat: f64, lng: f64) -> bool {
+    lat.is_finite() && lng.is_finite() && lat >= -90.0 && lat <= 90.0 && lng >= -180.0 && lng <= 180.0
+}
+
+// ── Application State ──────────────────────────────────────────────────────────
+
+pub struct AppState {
+    pub cache: RwLock<HashMap<String, (Vec<Bencinera>, Instant)>>,
+    pub client: reqwest::Client,
+}
+
+pub type SharedState = Arc<AppState>;
+
+// ── Bencineras ────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct BoundsQuery {
@@ -27,18 +46,24 @@ pub struct Bencinera {
 }
 
 pub async fn bencineras(
-    State(cache): State<BencineraCache>,
+    State(state): State<SharedState>,
     Query(b): Query<BoundsQuery>,
 ) -> impl IntoResponse {
+    // Validate bounds
+    if !is_valid_coord(b.south, b.west) || !is_valid_coord(b.north, b.east) {
+        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "Invalid bounds." }))).into_response();
+    }
+
     let key = format!("{:.2}:{:.2}:{:.2}:{:.2}", b.south, b.north, b.west, b.east);
     {
-        let guard = cache.read().await;
+        let guard = state.cache.read().await;
         if let Some((data, ts)) = guard.get(&key) {
-            if ts.elapsed() < Duration::from_secs(86400) {
+            if ts.elapsed() < Duration::from_secs(BENCINERA_TTL_SECS) {
                 return (StatusCode::OK, Json(data.clone())).into_response();
             }
         }
     }
+
     // Overpass API: amenity=fuel dentro del bounding box
     let query = format!(
         "[out:json][timeout:10];node[\"amenity\"=\"fuel\"]({},{},{},{});out;",
@@ -51,14 +76,12 @@ pub async fn bencineras(
         "https://overpass.private.coffee/api/interpreter",
     ];
 
-    let client = reqwest::Client::new();
     let mut raw: Option<serde_json::Value> = None;
 
     for mirror in &mirrors {
-        let result = client
+        let result = state.client
             .get(*mirror)
             .query(&[("data", &query)])
-            .timeout(std::time::Duration::from_secs(12))
             .send()
             .await;
 
@@ -77,7 +100,7 @@ pub async fn bencineras(
         Some(v) => v,
         None => return (
             StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": "Overpass API no disponible, intenta de nuevo." })),
+            Json(serde_json::json!({ "error": "Overpass API unavailable." })),
         ).into_response(),
     };
 
@@ -107,7 +130,9 @@ pub async fn bencineras(
         .collect();
 
     {
-        let mut guard = cache.write().await;
+        let mut guard = state.cache.write().await;
+        // Evict stale entries before inserting new one
+        guard.retain(|_, (_, ts)| ts.elapsed() < Duration::from_secs(BENCINERA_TTL_SECS));
         guard.insert(key, (bencineras.clone(), Instant::now()));
     }
     (StatusCode::OK, Json(bencineras)).into_response()
@@ -145,24 +170,61 @@ pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
             .into_response();
     }
 
+    if payload.coordinates.len() > MAX_NODES {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": format!("Maximum {} coordinates allowed.", MAX_NODES) })),
+        )
+            .into_response();
+    }
+
+    // Validate all coordinates
+    if payload.coordinates.iter().any(|c| !is_valid_coord(c.lat, c.lng)) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Invalid coordinates." })),
+        )
+            .into_response();
+    }
+
     let positions: Vec<(f32, f32)> = payload
         .coordinates
         .iter()
         .map(|c| (c.lat as f32, c.lng as f32))
         .collect();
 
-    let result = tokio::task::spawn_blocking(move || {
-        let mut tour = Tour::new(positions);
-        tour.random_tour();
-        tour.two_opt();
-        tour.or_opt();
-        tour.calculate_cost();
-        tour
-    })
-    .await
-    .unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_secs(SOLVER_TIMEOUT_SECS),
+        tokio::task::spawn_blocking(move || {
+            let mut tour = Tour::new(positions);
+            tour.random_tour();
+            tour.two_opt();
+            tour.or_opt();
+            tour.calculate_cost();
+            tour
+        }),
+    )
+    .await;
 
-    let route: Vec<RoutePoint> = result
+    let tour = match result {
+        Ok(Ok(t)) => t,
+        Ok(Err(_)) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Solver failed." })),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            return (
+                StatusCode::REQUEST_TIMEOUT,
+                Json(serde_json::json!({ "error": "Solver timed out." })),
+            )
+                .into_response();
+        }
+    };
+
+    let route: Vec<RoutePoint> = tour
         .route
         .iter()
         .map(|n| RoutePoint { lat: n.x as f64, lng: n.y as f64 })
@@ -172,7 +234,7 @@ pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
         StatusCode::OK,
         Json(serde_json::json!({
             "route": route,
-            "total_distance_km": result.cost
+            "total_distance_km": tour.cost
         })),
     )
         .into_response()

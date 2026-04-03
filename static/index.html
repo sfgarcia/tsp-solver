@@ -112,7 +112,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
-    const map = L.map('map').setView([-33.4489, -70.6693], 12);
+    const map = L.map('map').setView([-33.4254, -70.5822], 15);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
@@ -258,6 +258,7 @@
     // ── Bencineras ────────────────────────────────────────────────────────────
     let gasActive = false;
     let gasMarkers = [];
+    let gasDebounceTimer = null;
 
     function toggleGas() {
       gasActive = !gasActive;
@@ -288,15 +289,28 @@
         iconSize: [22, 22],
         iconAnchor: [11, 11],
       });
-      const nombre = g.nombre.replace(/'/g, "\\'");
-      const popup = `
-        <b>${g.nombre}</b><br>
-        ${g.direccion ? g.direccion + '<br>' : ''}
-        <button onclick="addGasToRoute(${g.lat},${g.lng},'${nombre}')"
-          style="margin-top:6px;padding:4px 10px;background:#89b4fa;border:none;border-radius:4px;cursor:pointer;font-size:0.8rem">
-          + Agregar a ruta
-        </button>`;
-      const m = L.marker([g.lat, g.lng], { icon }).addTo(map).bindPopup(popup);
+
+      // Build popup DOM imperatively to prevent XSS
+      const container = document.createElement('div');
+
+      const title = document.createElement('b');
+      title.textContent = g.nombre;
+      container.appendChild(title);
+
+      if (g.direccion) {
+        container.appendChild(document.createElement('br'));
+        container.appendChild(document.createTextNode(g.direccion));
+      }
+
+      container.appendChild(document.createElement('br'));
+
+      const btn = document.createElement('button');
+      btn.textContent = '+ Agregar a ruta';
+      btn.style.cssText = 'margin-top:6px;padding:4px 10px;background:#89b4fa;border:none;border-radius:4px;cursor:pointer;font-size:0.8rem';
+      btn.addEventListener('click', () => addGasToRoute(g.lat, g.lng, g.nombre));
+      container.appendChild(btn);
+
+      const m = L.marker([g.lat, g.lng], { icon }).addTo(map).bindPopup(container);
       gasMarkers.push(m);
     }
 
@@ -315,7 +329,11 @@
       setStatus(`${markers.length} punto(s) en ruta`);
     }
 
-    map.on('moveend', () => { if (gasActive) loadGas(); });
+    map.on('moveend', () => {
+      if (!gasActive) return;
+      clearTimeout(gasDebounceTimer);
+      gasDebounceTimer = setTimeout(loadGas, 500);
+    });
 
     // Registrar service worker (necesario para PWA)
     if ('serviceWorker' in navigator) {
