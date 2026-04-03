@@ -87,7 +87,7 @@ pub async fn login_cne(client: &reqwest::Client, email: &str, password: &str) ->
         .ok()?;
 
     let json: serde_json::Value = resp.json().await.ok()?;
-    json["access_token"].as_str().map(|s| s.to_string())
+    json["token"].as_str().map(|s| s.to_string())
 }
 
 pub async fn fetch_cne_stations(client: &reqwest::Client, token: &str) -> Vec<CneStation> {
