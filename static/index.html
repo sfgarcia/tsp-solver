@@ -302,6 +302,19 @@
         container.appendChild(document.createTextNode(g.direccion));
       }
 
+      // Add fuel prices if available
+      if (g.precio_93 || g.precio_95 || g.precio_97) {
+        container.appendChild(document.createElement('br'));
+        const pricesDiv = document.createElement('div');
+        pricesDiv.style.cssText = 'font-size:0.8rem;margin-top:4px;color:#6c7086';
+        let priceText = [];
+        if (g.precio_93) priceText.push(`93: $${g.precio_93}`);
+        if (g.precio_95) priceText.push(`95: $${g.precio_95}`);
+        if (g.precio_97) priceText.push(`97: $${g.precio_97}`);
+        pricesDiv.textContent = priceText.join(' | ');
+        container.appendChild(pricesDiv);
+      }
+
       container.appendChild(document.createElement('br'));
 
       const btn = document.createElement('button');

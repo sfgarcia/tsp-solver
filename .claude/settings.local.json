@@ -12,7 +12,10 @@
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(f'Total: {len\\(d[\\\\\"elements\\\\\"]\\)} bencineras'\\); print\\(json.dumps\\(d['elements'][0], indent=2\\)\\)\")",
       "mcp__puppeteer__puppeteer_click",
       "Bash(./target/debug/tsp-solver)",
-      "Bash([ -f bencineras_cache.json ])"
+      "Bash([ -f bencineras_cache.json ])",
+      "Bash(python3:*)",
+      "Bash(./target/release/tsp-solver.exe)",
+      "Bash(taskkill //F //IM tsp-solver.exe sleep 1 cat bencineras_cache.json)"
     ]
   }
 }

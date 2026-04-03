@@ -13,6 +13,9 @@ const SOLVER_TIMEOUT_SECS: u64 = 30;
 const BENCINERA_TTL_SECS: u64 = 86400;
 pub const CACHE_FILE: &str = "bencineras_cache.json";
 
+/// Tile size in degrees (~11 km). Each tile covers [lat, lat+SIZE) × [lng, lng+SIZE).
+const TILE_SIZE: f64 = 0.1;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn now_unix() -> u64 {
@@ -29,18 +32,54 @@ fn is_valid_coord(lat: f64, lng: f64) -> bool {
     lat.is_finite() && lng.is_finite() && lat >= -90.0 && lat <= 90.0 && lng >= -180.0 && lng <= 180.0
 }
 
+// ── Tile helpers ──────────────────────────────────────────────────────────────
+
+/// Round down to the nearest tile boundary.
+fn tile_origin(v: f64) -> f64 {
+    (v / TILE_SIZE).floor() * TILE_SIZE
+}
+
+/// Stable string key for a tile: "{south:.1}:{west:.1}"
+fn tile_key(south: f64, west: f64) -> String {
+    format!("{:.1}:{:.1}", south, west)
+}
+
+/// Return all tile (south, west) origins that overlap the given bbox.
+fn tiles_in_bbox(south: f64, north: f64, west: f64, east: f64) -> Vec<(f64, f64)> {
+    let mut tiles = Vec::new();
+    let mut lat = tile_origin(south);
+    while lat < north {
+        let mut lng = tile_origin(west);
+        while lng < east {
+            tiles.push((lat, lng));
+            lng = (lng * 10.0 + 1.0).round() / 10.0; // advance by exactly TILE_SIZE
+        }
+        lat = (lat * 10.0 + 1.0).round() / 10.0;
+    }
+    tiles
+}
+
 // ── Cache persistence ─────────────────────────────────────────────────────────
+//
+// Key format: "{south:.1}:{west:.1}"  (exactly one colon)
+// Legacy bbox keys (e.g. "-33.50:-33.40:-70.70:-70.55") have 3 colons and are dropped.
+// Legacy commune keys (no colon) are also dropped.
 
-pub type CommuneStore = HashMap<String, (Vec<Bencinera>, u64)>;
+pub type TileCache = HashMap<String, (Vec<Bencinera>, u64)>;
 
-pub async fn load_cache_from_disk() -> CommuneStore {
+pub async fn load_cache_from_disk() -> TileCache {
     match tokio::fs::read_to_string(CACHE_FILE).await {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-        Err(_) => CommuneStore::new(),
+        Ok(s) => {
+            let raw: TileCache = serde_json::from_str(&s).unwrap_or_default();
+            raw.into_iter()
+                .filter(|(k, _)| k.matches(':').count() == 1)
+                .collect()
+        }
+        Err(_) => TileCache::new(),
     }
 }
 
-async fn save_cache_to_disk(snapshot: CommuneStore) {
+async fn save_cache_to_disk(snapshot: TileCache) {
     if let Ok(json) = serde_json::to_string(&snapshot) {
         let _ = tokio::fs::write(CACHE_FILE, json).await;
     }
@@ -49,7 +88,7 @@ async fn save_cache_to_disk(snapshot: CommuneStore) {
 // ── Application State ──────────────────────────────────────────────────────────
 
 pub struct AppState {
-    pub communes: RwLock<CommuneStore>,
+    pub tiles: RwLock<TileCache>,
     pub client: reqwest::Client,
 }
 
@@ -71,9 +110,18 @@ pub struct Bencinera {
     pub lng:       f64,
     pub nombre:    String,
     pub direccion: String,
+    pub precio_93: Option<String>,
+    pub precio_95: Option<String>,
+    pub precio_97: Option<String>,
 }
 
-// ── Helpers for Overpass parsing ───────────────────────────────────────────────
+// ── Overpass API ──────────────────────────────────────────────────────────────
+
+const MIRRORS: [&str; 3] = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+];
 
 fn parse_bencinera(e: &serde_json::Value) -> Option<Bencinera> {
     let lat = e["lat"].as_f64()?;
@@ -89,100 +137,24 @@ fn parse_bencinera(e: &serde_json::Value) -> Option<Bencinera> {
             if num.is_empty() { s.to_string() } else { format!("{} {}", s, num) }
         })
         .unwrap_or_default();
-    Some(Bencinera { lat, lng, nombre, direccion })
+    let precio_93 = tags["fuel:93"].as_str().map(|s| s.to_string());
+    let precio_95 = tags["fuel:95"].as_str().map(|s| s.to_string());
+    let precio_97 = tags["fuel:97"].as_str().map(|s| s.to_string());
+    Some(Bencinera { lat, lng, nombre, direccion, precio_93, precio_95, precio_97 })
 }
 
-// ── Overpass API functions ──────────────────────────────────────────────────────
-
-async fn fetch_communes_in_bbox(
-    client: &reqwest::Client,
-    south: f64, north: f64, west: f64, east: f64,
-) -> Vec<String> {
-    let query = format!(
-        "[out:json][timeout:10];\
-         rel[\"boundary\"=\"administrative\"][\"admin_level\"=\"8\"]({},{},{},{});\
-         out center;",
-        south, west, north, east
-    );
-
-    let mirrors = [
-        "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter",
-    ];
-
-    for mirror in &mirrors {
-        let Ok(resp) = client.get(*mirror).query(&[("data", &query)]).send().await else {
-            continue;
-        };
-        let Ok(text) = resp.text().await else { continue };
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
-
-        if let Some(elements) = json["elements"].as_array() {
-            return elements
-                .iter()
-                .filter_map(|e| e["tags"]["name"].as_str().map(String::from))
-                .collect();
-        }
-    }
-
-    Vec::new()
-}
-
-async fn fetch_bencineras_for_commune(
-    client: &reqwest::Client,
-    commune_name: &str,
-) -> Option<Vec<Bencinera>> {
-    let escaped_name = commune_name.replace('"', "\\\"");
-    let query = format!(
-        "[out:json][timeout:30];\
-         area[\"name\"=\"{}\"][\"boundary\"=\"administrative\"][\"admin_level\"=\"8\"]->.a;\
-         node[\"amenity\"=\"fuel\"](area.a);\
-         out;",
-        escaped_name
-    );
-
-    let mirrors = [
-        "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter",
-    ];
-
-    for mirror in &mirrors {
-        let Ok(resp) = client.get(*mirror).query(&[("data", &query)]).send().await else {
-            continue;
-        };
-        let Ok(text) = resp.text().await else { continue };
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
-
-        if let Some(elements) = json["elements"].as_array() {
-            let bencineras: Vec<Bencinera> = elements
-                .iter()
-                .filter_map(parse_bencinera)
-                .collect();
-            return Some(bencineras);
-        }
-    }
-
-    None
-}
-
-async fn fetch_bencineras_bbox_direct(
+/// Fetch all amenity=fuel nodes inside [south, north] × [west, east].
+/// Returns None only if every mirror is unreachable.
+async fn fetch_tile(
     client: &reqwest::Client,
     south: f64, north: f64, west: f64, east: f64,
 ) -> Option<Vec<Bencinera>> {
     let query = format!(
-        "[out:json][timeout:10];node[\"amenity\"=\"fuel\"]({},{},{},{});out;",
+        "[out:json][timeout:15];node[\"amenity\"=\"fuel\"]({},{},{},{});out;",
         south, west, north, east
     );
 
-    let mirrors = [
-        "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass-api.de/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter",
-    ];
-
-    for mirror in &mirrors {
+    for mirror in &MIRRORS {
         let Ok(resp) = client.get(*mirror).query(&[("data", &query)]).send().await else {
             continue;
         };
@@ -190,14 +162,9 @@ async fn fetch_bencineras_bbox_direct(
         let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) else { continue };
 
         if let Some(elements) = json["elements"].as_array() {
-            let bencineras: Vec<Bencinera> = elements
-                .iter()
-                .filter_map(parse_bencinera)
-                .collect();
-            return Some(bencineras);
+            return Some(elements.iter().filter_map(parse_bencinera).collect());
         }
     }
-
     None
 }
 
@@ -205,90 +172,80 @@ pub async fn bencineras(
     State(state): State<SharedState>,
     Query(b): Query<BoundsQuery>,
 ) -> impl IntoResponse {
-    // ── 1. Validate bounds ──────────────────────────────────────────────────
+    // ── 1. Validate ─────────────────────────────────────────────────────────
     if !is_valid_coord(b.south, b.west) || !is_valid_coord(b.north, b.east) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": "Invalid bounds." }))).into_response();
+        return (StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Invalid bounds." }))).into_response();
     }
 
-    // ── 2. Discover communes in bbox ────────────────────────────────────────
-    let communes_in_bbox = fetch_communes_in_bbox(
-        &state.client, b.south, b.north, b.west, b.east
-    ).await;
+    // ── 2. Determine which tiles the bbox covers ─────────────────────────────
+    let tile_origins = tiles_in_bbox(b.south, b.north, b.west, b.east);
 
-    // ── 3. Fallback if no communes ──────────────────────────────────────────
-    if communes_in_bbox.is_empty() {
-        return match fetch_bencineras_bbox_direct(
-            &state.client, b.south, b.north, b.west, b.east
-        ).await {
-            Some(bencineras) => (StatusCode::OK, Json(bencineras)).into_response(),
-            None => (StatusCode::BAD_GATEWAY, Json(serde_json::json!({ "error": "Overpass API unavailable." }))).into_response(),
-        };
-    }
-
-    // ── 4. Classify communes: cache hit vs need fetch ───────────────────────
+    // ── 3. Classify tiles: cache hit vs need to fetch ────────────────────────
     let mut all_bencineras: Vec<Bencinera> = Vec::new();
-    let mut communes_to_fetch: Vec<String> = Vec::new();
+    let mut tiles_to_fetch: Vec<(f64, f64)> = Vec::new();
 
     {
-        let guard = state.communes.read().await;
-        for commune in &communes_in_bbox {
-            match guard.get(commune) {
+        let guard = state.tiles.read().await;
+        for &(tlat, tlng) in &tile_origins {
+            let key = tile_key(tlat, tlng);
+            match guard.get(&key) {
                 Some((data, ts)) if is_fresh(*ts) => {
                     all_bencineras.extend_from_slice(data);
                 }
                 _ => {
-                    communes_to_fetch.push(commune.clone());
+                    tiles_to_fetch.push((tlat, tlng));
                 }
             }
         }
     }
 
-    // ── 5. Fetch missing communes (parallelized) ────────────────────────────
-    let mut newly_fetched: Vec<(String, Vec<Bencinera>)> = Vec::new();
-
-    if !communes_to_fetch.is_empty() {
-        let handles: Vec<_> = communes_to_fetch
+    // ── 4. Fetch missing tiles in parallel ───────────────────────────────────
+    if !tiles_to_fetch.is_empty() {
+        let handles: Vec<_> = tiles_to_fetch
             .iter()
-            .map(|commune| {
+            .map(|&(tlat, tlng)| {
                 let client = state.client.clone();
-                let commune = commune.clone();
                 tokio::spawn(async move {
-                    let result = fetch_bencineras_for_commune(&client, &commune).await;
-                    (commune, result)
+                    let result = fetch_tile(
+                        &client,
+                        tlat, tlat + TILE_SIZE,
+                        tlng, tlng + TILE_SIZE,
+                    ).await;
+                    (tlat, tlng, result)
                 })
             })
             .collect();
 
+        let mut newly_fetched: Vec<(String, Vec<Bencinera>)> = Vec::new();
+
         for handle in handles {
-            if let Ok((commune, Some(bencineras))) = handle.await {
+            if let Ok((tlat, tlng, Some(bencineras))) = handle.await {
                 all_bencineras.extend_from_slice(&bencineras);
-                newly_fetched.push((commune, bencineras));
+                newly_fetched.push((tile_key(tlat, tlng), bencineras));
             }
         }
-    }
 
-    // ── 6. Persist new entries to cache ─────────────────────────────────────
-    if !newly_fetched.is_empty() {
-        let mut guard = state.communes.write().await;
-        let ts = now_unix();
-        guard.retain(|_, (_, t)| is_fresh(*t));
-        for (commune, bencineras) in newly_fetched {
-            guard.insert(commune, (bencineras, ts));
+        if !newly_fetched.is_empty() {
+            let mut guard = state.tiles.write().await;
+            let ts = now_unix();
+            guard.retain(|_, (_, t)| is_fresh(*t));
+            for (key, bencineras) in newly_fetched {
+                guard.insert(key, (bencineras, ts));
+            }
+            let snapshot = guard.clone();
+            tokio::spawn(async move {
+                save_cache_to_disk(snapshot).await;
+            });
         }
-        let snapshot = guard.clone();
-        tokio::spawn(async move {
-            save_cache_to_disk(snapshot).await;
-        });
     }
 
-    // ── 7. Dedup by position ────────────────────────────────────────────────
+    // ── 5. Dedup by exact position, filter to original bbox ─────────────────
     all_bencineras.sort_by(|a, b| {
         a.lat.partial_cmp(&b.lat).unwrap_or(std::cmp::Ordering::Equal)
             .then(a.lng.partial_cmp(&b.lng).unwrap_or(std::cmp::Ordering::Equal))
     });
     all_bencineras.dedup_by(|a, b| a.lat == b.lat && a.lng == b.lng);
-
-    // ── 8. Filter to bbox ───────────────────────────────────────────────────
     all_bencineras.retain(|item| {
         item.lat >= b.south && item.lat <= b.north
             && item.lng >= b.west && item.lng <= b.east
@@ -320,6 +277,114 @@ pub struct RoutePoint {
     pub lng: f64,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_valid_coord Tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn is_valid_coord_valid_cases() {
+        assert!(is_valid_coord(0.0, 0.0));
+        assert!(is_valid_coord(-90.0, -180.0));
+        assert!(is_valid_coord(90.0, 180.0));
+        assert!(is_valid_coord(-33.87, -70.72)); // Santiago
+        assert!(is_valid_coord(51.5, -0.1));     // London
+    }
+
+    #[test]
+    fn is_valid_coord_out_of_range_latitude() {
+        assert!(!is_valid_coord(91.0, 0.0));
+        assert!(!is_valid_coord(-91.0, 0.0));
+    }
+
+    #[test]
+    fn is_valid_coord_out_of_range_longitude() {
+        assert!(!is_valid_coord(0.0, 181.0));
+        assert!(!is_valid_coord(0.0, -181.0));
+    }
+
+    #[test]
+    fn is_valid_coord_nan() {
+        assert!(!is_valid_coord(f64::NAN, 0.0));
+        assert!(!is_valid_coord(0.0, f64::NAN));
+    }
+
+    #[test]
+    fn is_valid_coord_infinity() {
+        assert!(!is_valid_coord(f64::INFINITY, 0.0));
+        assert!(!is_valid_coord(0.0, f64::NEG_INFINITY));
+    }
+
+    #[test]
+    fn is_valid_coord_boundaries() {
+        assert!(is_valid_coord(-90.0, -180.0));
+        assert!(is_valid_coord(90.0, 180.0));
+        assert!(!is_valid_coord(-90.1, 0.0));
+        assert!(!is_valid_coord(90.1, 0.0));
+    }
+
+    // ── is_fresh Tests ────────────────────────────────────────────────────────
+
+    #[test]
+    fn is_fresh_recent_timestamp() {
+        let now = now_unix();
+        assert!(is_fresh(now));
+        assert!(is_fresh(now - 1));
+        assert!(is_fresh(now - 1000));
+    }
+
+    #[test]
+    fn is_fresh_stale_timestamp() {
+        let old_time = now_unix() - BENCINERA_TTL_SECS - 1;
+        assert!(!is_fresh(old_time));
+    }
+
+    #[test]
+    fn is_fresh_boundary_ttl() {
+        let boundary = now_unix() - BENCINERA_TTL_SECS + 1;
+        assert!(is_fresh(boundary), "should be fresh just before expiry");
+
+        let expired = now_unix() - BENCINERA_TTL_SECS;
+        assert!(!is_fresh(expired), "should be expired at TTL boundary");
+    }
+
+    // ── Tile Helper Tests ─────────────────────────────────────────────────────
+
+    #[test]
+    fn tile_origin_aligns_to_boundary() {
+        // tile_origin should snap down to nearest TILE_SIZE (0.1)
+        assert_eq!(tile_origin(0.15), 0.1);
+        assert_eq!(tile_origin(0.19), 0.1);
+        assert_eq!(tile_origin(0.20), 0.2);
+        assert_eq!(tile_origin(-33.87), -33.9);
+    }
+
+    #[test]
+    fn tile_key_formats_correctly() {
+        let key = tile_key(-33.8, -70.7);
+        assert_eq!(key, "-33.8:-70.7");
+
+        let key = tile_key(0.0, 0.0);
+        assert_eq!(key, "0.0:0.0");
+    }
+
+    #[test]
+    fn tiles_in_bbox_single_tile() {
+        // A small bbox that fits in one tile
+        let tiles = tiles_in_bbox(-33.85, -33.80, -70.75, -70.70);
+        assert!(!tiles.is_empty());
+    }
+
+    #[test]
+    fn tiles_in_bbox_covers_span() {
+        // A bbox that spans multiple tiles
+        let tiles = tiles_in_bbox(-33.9, -33.5, -70.9, -70.5);
+        // Should have multiple tiles covering this region
+        assert!(tiles.len() > 1);
+    }
+}
+
 pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
     if payload.coordinates.len() < 3 {
         return (
@@ -337,7 +402,6 @@ pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
             .into_response();
     }
 
-    // Validate all coordinates
     if payload.coordinates.iter().any(|c| !is_valid_coord(c.lat, c.lng)) {
         return (
             StatusCode::BAD_REQUEST,
@@ -356,7 +420,7 @@ pub async fn solve(Json(payload): Json<SolveRequest>) -> impl IntoResponse {
         Duration::from_secs(SOLVER_TIMEOUT_SECS),
         tokio::task::spawn_blocking(move || {
             let mut tour = Tour::new(positions);
-            tour.random_tour();
+            tour.nearest_neighbour_tour();
             tour.two_opt();
             tour.or_opt();
             tour.calculate_cost();

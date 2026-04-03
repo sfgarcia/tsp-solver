@@ -223,10 +223,260 @@ fn haversine_km(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
 mod tests {
     use super::*;
 
+    // ── Haversine Distance Tests ───────────────────────────────────────────────
+
     #[test]
     fn haversine_london_to_paris() {
         // London (51.5074, -0.1278) → Paris (48.8566, 2.3522) ≈ 341 km
         let d = haversine_km(51.5074, -0.1278, 48.8566, 2.3522);
         assert!((d - 341.0).abs() < 5.0, "expected ~341 km, got {:.1}", d);
+    }
+
+    #[test]
+    fn haversine_zero_distance() {
+        // Same point should be ~0 km
+        let d = haversine_km(51.5, -0.1, 51.5, -0.1);
+        assert!(d < 0.001, "expected ~0 km, got {:.6}", d);
+    }
+
+    #[test]
+    fn haversine_symmetry() {
+        // Distance A → B should equal B → A
+        let d1 = haversine_km(51.5, -0.1, 48.8, 2.3);
+        let d2 = haversine_km(48.8, 2.3, 51.5, -0.1);
+        assert!((d1 - d2).abs() < 0.01, "symmetry failed: {:.2} vs {:.2}", d1, d2);
+    }
+
+    #[test]
+    fn haversine_santiago_to_valparaiso() {
+        // Santiago (-33.87, -70.72) → Valparaíso (-33.04, -71.63) ≈ 125 km
+        let d = haversine_km(-33.87, -70.72, -33.04, -71.63);
+        assert!((d - 125.0).abs() < 10.0, "expected ~125 km, got {:.1}", d);
+    }
+
+    // ── Tour Construction Tests ────────────────────────────────────────────────
+
+    #[test]
+    fn tour_new_creates_closed_loop() {
+        // Tour with 3 nodes should have route[0] == route[last]
+        let positions = vec![(0.0, 0.0), (10.0, 0.0), (5.0, 5.0)];
+        let tour = Tour::new(positions);
+        assert_eq!(tour.route.len(), 4, "route should have 4 nodes (3 + 1 closing)");
+        assert_eq!(tour.route[0].id, tour.route[3].id);
+    }
+
+    #[test]
+    fn tour_new_initializes_nodes() {
+        let positions = vec![(1.0, 2.0), (3.0, 4.0)];
+        let tour = Tour::new(positions);
+        assert_eq!(tour.nodes.len(), 2);
+        assert_eq!(tour.nodes[0].x, 1.0);
+        assert_eq!(tour.nodes[0].y, 2.0);
+    }
+
+    #[test]
+    fn tour_calculate_cost_single_point() {
+        let positions = vec![(0.0, 0.0)];
+        let mut tour = Tour::new(positions);
+        tour.calculate_cost();
+        assert!(tour.cost < 0.01, "single node cost should be ~0, got {}", tour.cost);
+    }
+
+    #[test]
+    fn tour_calculate_cost_triangle() {
+        // 3 nodes in a right triangle: (0,0) → (3,0) → (0,4) → (0,0)
+        // Distances: 3 + 5 + 4 = 12 (Haversine approximates Euclidean for small distances)
+        let positions = vec![(0.0, 0.0), (0.003, 0.0), (0.0, 0.004)];
+        let mut tour = Tour::new(positions);
+        tour.calculate_cost();
+        // Cost should be positive (sum of edge weights)
+        assert!(tour.cost > 0.0, "cost should be positive, got {}", tour.cost);
+    }
+
+    #[test]
+    fn tour_distance_matrix_symmetric() {
+        let positions = vec![(0.0, 0.0), (10.0, 0.0), (5.0, 5.0)];
+        let mut tour = Tour::new(positions);
+        tour.distance_matrix();
+
+        // Distance[i][j] should equal distance[j][i]
+        for i in 0..tour.nodes.len() {
+            for j in 0..tour.nodes.len() {
+                let d_ij = tour.distance[i][j];
+                let d_ji = tour.distance[j][i];
+                assert_eq!(d_ij, d_ji, "asymmetric distance: [{},{}]={:?} vs [{},{}]={:?}", i, j, d_ij, j, i, d_ji);
+            }
+        }
+    }
+
+    #[test]
+    fn tour_distance_matrix_diagonal_zero() {
+        let positions = vec![(0.0, 0.0), (10.0, 0.0), (5.0, 5.0)];
+        let mut tour = Tour::new(positions);
+        tour.distance_matrix();
+
+        // Distance from a node to itself should be ~0
+        for i in 0..tour.nodes.len() {
+            let d = tour.distance[i][i].unwrap_or(f32::NAN);
+            assert!(d < 0.01, "diagonal distance should be ~0, got {}", d);
+        }
+    }
+
+    // ── Nearest Neighbour Algorithm Tests ──────────────────────────────────────
+
+    #[test]
+    fn nearest_neighbour_visits_all_nodes() {
+        let positions = vec![(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0)];
+        let mut tour = Tour::new(positions);
+        tour.nearest_neighbour_tour();
+
+        // Route should have n+1 nodes (n cities + 1 return to start)
+        assert_eq!(tour.route.len(), 5, "route should visit all 4 nodes + return");
+
+        // Should start and end at node 0
+        assert_eq!(tour.route[0].id, 0);
+        assert_eq!(tour.route[4].id, 0);
+
+        // Should visit all intermediate nodes once
+        let mut visited = vec![false; tour.nodes.len()];
+        for i in 0..tour.route.len() - 1 {
+            visited[tour.route[i].id] = true;
+        }
+        for v in visited.iter() {
+            assert!(v, "not all nodes visited");
+        }
+    }
+
+    #[test]
+    fn nearest_neighbour_start_is_node_zero() {
+        let positions = vec![(0.0, 0.0), (100.0, 100.0), (10.0, 10.0)];
+        let mut tour = Tour::new(positions);
+        tour.nearest_neighbour_tour();
+        assert_eq!(tour.route[0].id, 0, "should start from node 0");
+    }
+
+    #[test]
+    fn nearest_neighbour_three_nodes() {
+        let positions = vec![(0.0, 0.0), (1.0, 0.0), (0.5, 0.5)];
+        let mut tour = Tour::new(positions);
+        tour.nearest_neighbour_tour();
+
+        // Should have visited all 3 nodes + return to start
+        assert_eq!(tour.route.len(), 4);
+        assert_eq!(tour.route[0].id, 0);
+        assert_eq!(tour.route[3].id, 0);
+
+        // All nodes should be present in route[0..3]
+        // (order depends on which neighbor is nearest from each node)
+        let visited: Vec<usize> = tour.route[1..3].iter().map(|n| n.id).collect();
+        assert!(visited.contains(&1));
+        assert!(visited.contains(&2));
+    }
+
+    // ── 2-Opt Algorithm Tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn two_opt_does_not_worsen_cost() {
+        let positions = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let mut tour = Tour::new(positions);
+        tour.random_tour();
+        tour.calculate_cost();
+        let cost_before = tour.cost;
+
+        tour.two_opt();
+        tour.calculate_cost();
+        let cost_after = tour.cost;
+
+        assert!(cost_after <= cost_before + 0.1, "2-opt made route worse: {} → {}", cost_before, cost_after);
+    }
+
+    #[test]
+    fn two_opt_preserves_all_nodes() {
+        let positions = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let mut tour = Tour::new(positions);
+        tour.random_tour();
+        tour.two_opt();
+
+        // All nodes should still be in route (except closing duplicate)
+        assert_eq!(tour.route.len(), 5);
+        assert_eq!(tour.route[0].id, tour.route[4].id);
+    }
+
+    // ── Or-Opt Algorithm Tests ────────────────────────────────────────────────
+
+    #[test]
+    fn or_opt_preserves_route_length() {
+        let positions = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (5.0, 5.0)];
+        let mut tour = Tour::new(positions);
+        tour.random_tour();
+        let len_before = tour.route.len();
+
+        tour.or_opt();
+
+        assert_eq!(tour.route.len(), len_before, "or_opt changed route length");
+    }
+
+    #[test]
+    fn or_opt_keeps_all_nodes() {
+        let positions = vec![(0.0, 0.0), (1.0, 1.0), (2.0, 0.0), (1.0, -1.0)];
+        let mut tour = Tour::new(positions);
+        tour.random_tour();
+
+        // Record original nodes
+        let original_ids: Vec<usize> = tour.route[..tour.route.len() - 1]
+            .iter()
+            .map(|n| n.id)
+            .collect();
+
+        tour.or_opt();
+
+        // Check all nodes still present (minus the closing duplicate)
+        let final_ids: Vec<usize> = tour.route[..tour.route.len() - 1]
+            .iter()
+            .map(|n| n.id)
+            .collect();
+
+        assert_eq!(final_ids.len(), original_ids.len());
+        for id in original_ids.iter() {
+            assert!(final_ids.contains(id), "node {} missing after or_opt", id);
+        }
+    }
+
+    #[test]
+    fn or_opt_does_not_worsen_cost() {
+        let positions = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (5.0, 5.0)];
+        let mut tour = Tour::new(positions);
+        tour.random_tour();
+        tour.calculate_cost();
+        let cost_before = tour.cost;
+
+        tour.or_opt();
+        tour.calculate_cost();
+        let cost_after = tour.cost;
+
+        assert!(cost_after <= cost_before + 0.1, "or_opt made route worse: {} → {}", cost_before, cost_after);
+    }
+
+    // ── Random Tour Tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn random_tour_visits_all_nodes() {
+        let positions = vec![(0.0, 0.0), (1.0, 1.0), (2.0, 2.0)];
+        let mut tour = Tour::new(positions);
+        tour.random_tour();
+
+        // Should have n+1 nodes in route (n cities + return)
+        assert_eq!(tour.route.len(), 4);
+        assert_eq!(tour.route[0].id, 0);
+        assert_eq!(tour.route[3].id, 0);
+    }
+
+    // ── Edge Case Tests ────────────────────────────────────────────────────────
+
+    #[test]
+    #[should_panic(expected = "Tour requires at least one node")]
+    fn tour_new_empty_positions_panics() {
+        let positions: Vec<(f32, f32)> = vec![];
+        Tour::new(positions);
     }
 }

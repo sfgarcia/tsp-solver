@@ -17,14 +17,14 @@ async fn main() {
     let icon     = include_str!("../static/icon.svg");
 
     // Load cache from disk (if it exists)
-    let initial_communes = handlers::load_cache_from_disk().await;
+    let initial_tiles = handlers::load_cache_from_disk().await;
 
     let state: SharedState = Arc::new(AppState {
-        communes: RwLock::new(initial_communes),
+        tiles: RwLock::new(initial_tiles),
         client: reqwest::Client::builder()
-            .timeout(Duration::from_secs(12))
+            .timeout(Duration::from_secs(45))
             .build()
-            .unwrap(),
+            .expect("failed to build reqwest client"),
     });
 
     let app = axum::Router::new()
@@ -36,21 +36,21 @@ async fn main() {
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/manifest+json")
                 .body(Body::from(manifest))
-                .unwrap()
+                .expect("failed to build manifest response")
         }))
         .route("/sw.js", axum::routing::get(move || async move {
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "application/javascript")
                 .body(Body::from(sw))
-                .unwrap()
+                .expect("failed to build sw response")
         }))
         .route("/icon.svg", axum::routing::get(move || async move {
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, "image/svg+xml")
                 .body(Body::from(icon))
-                .unwrap()
+                .expect("failed to build icon response")
         }))
         .route("/solve", axum::routing::post(handlers::solve))
         .route("/bencineras", axum::routing::get(handlers::bencineras))
@@ -59,7 +59,9 @@ async fn main() {
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&addr).await
+        .expect("failed to bind TCP listener");
     println!("Listening on http://{}", addr);
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await
+        .expect("server error");
 }
