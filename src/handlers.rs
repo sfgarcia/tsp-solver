@@ -200,27 +200,21 @@ pub async fn bencineras(
         }
     }
 
-    // ── 4. Fetch missing tiles in parallel ───────────────────────────────────
+    // ── 4. Fetch missing tiles sequentially with backoff ───────────────────────
     if !tiles_to_fetch.is_empty() {
-        let handles: Vec<_> = tiles_to_fetch
-            .iter()
-            .map(|&(tlat, tlng)| {
-                let client = state.client.clone();
-                tokio::spawn(async move {
-                    let result = fetch_tile(
-                        &client,
-                        tlat, tlat + TILE_SIZE,
-                        tlng, tlng + TILE_SIZE,
-                    ).await;
-                    (tlat, tlng, result)
-                })
-            })
-            .collect();
-
         let mut newly_fetched: Vec<(String, Vec<Bencinera>)> = Vec::new();
 
-        for handle in handles {
-            if let Ok((tlat, tlng, Some(bencineras))) = handle.await {
+        for (idx, &(tlat, tlng)) in tiles_to_fetch.iter().enumerate() {
+            // Backoff: add slight delay between requests to avoid overwhelming API
+            if idx > 0 {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+
+            if let Some(bencineras) = fetch_tile(
+                &state.client,
+                tlat, tlat + TILE_SIZE,
+                tlng, tlng + TILE_SIZE,
+            ).await {
                 all_bencineras.extend_from_slice(&bencineras);
                 newly_fetched.push((tile_key(tlat, tlng), bencineras));
             }

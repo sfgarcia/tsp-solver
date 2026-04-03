@@ -22,7 +22,7 @@ async fn main() {
     let state: SharedState = Arc::new(AppState {
         tiles: RwLock::new(initial_tiles),
         client: reqwest::Client::builder()
-            .timeout(Duration::from_secs(45))
+            .timeout(Duration::from_secs(20))
             .build()
             .expect("failed to build reqwest client"),
     });
