@@ -49,10 +49,11 @@ impl Tour {
         if self.distance[node_1.id][node_2.id] != 0.0 {
             return self.distance[node_1.id][node_2.id];
         }
-        else if self.distance[node_2.id][node_1.id] != 0.0 {
+        if self.distance[node_2.id][node_1.id] != 0.0 {
             return self.distance[node_2.id][node_1.id];
         }
-        ((node_1.x - node_2.x).powi(2) + (node_1.y - node_2.y).powi(2)).sqrt()
+        haversine_km(node_1.x as f64, node_1.y as f64,
+                     node_2.x as f64, node_2.y as f64) as f32
     }
 
     pub fn distance_matrix(&mut self) {
@@ -129,4 +130,26 @@ impl Tour {
         }
     }
 
+}
+
+fn haversine_km(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
+    const R: f64 = 6371.0;
+    let dlat = (lat2 - lat1).to_radians();
+    let dlng = (lng2 - lng1).to_radians();
+    let a = (dlat / 2.0).sin().powi(2)
+        + lat1.to_radians().cos() * lat2.to_radians().cos()
+        * (dlng / 2.0).sin().powi(2);
+    R * 2.0 * a.sqrt().asin()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn haversine_london_to_paris() {
+        // London (51.5074, -0.1278) → Paris (48.8566, 2.3522) ≈ 341 km
+        let d = haversine_km(51.5074, -0.1278, 48.8566, 2.3522);
+        assert!((d - 341.0).abs() < 5.0, "expected ~341 km, got {:.1}", d);
+    }
 }

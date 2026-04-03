@@ -1,33 +1,19 @@
-use crate::tour::Node;
-use crate::tour::Tour;
-use crate::visualization::plot_route;
-
+pub mod handlers;
 pub mod tour;
-pub mod visualization;
 
-fn main() {
-    let route = generate_random_graph();
-    let _ = plot_route(&route, 640, 480, "graph.png");
-}
+#[tokio::main]
+async fn main() {
+    let html = include_str!("../static/index.html");
 
-fn generate_graph() -> Vec<Node> {
-    let nodes = vec![
-        (0.0, 0.0),
-        (100.0, 50.0),
-        (50.0, 100.0),
-        (25.0, 25.0),
-        (35.0, 50.0),
-    ];
-    let mut tour = Tour::new(nodes);
-    //tour.nearest_neighbour_tour();
-    //tour.random_tour();
-    tour.two_opt();
-    tour.route
-}
+    let app = axum::Router::new()
+        .route(
+            "/",
+            axum::routing::get(move || async move { axum::response::Html(html) }),
+        )
+        .route("/solve", axum::routing::post(handlers::solve))
+        .layer(tower_http::cors::CorsLayer::permissive());
 
-fn generate_random_graph() -> Vec<Node> {
-    let mut tour = Tour::create_random_nodes(10, 100.0, 100.0);
-    //tour.nearest_neighbour_tour();
-    tour.two_opt();
-    tour.route
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    println!("Listening on http://localhost:3000");
+    axum::serve(listener, app).await.unwrap();
 }

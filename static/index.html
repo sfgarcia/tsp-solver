@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TSP Solver</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
+    #controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 16px;
+      background: #1e1e2e;
+      color: #cdd6f4;
+    }
+    #controls h1 { font-size: 1rem; font-weight: 600; margin-right: 8px; }
+    button {
+      padding: 6px 14px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+    #btn-solve { background: #89b4fa; color: #1e1e2e; }
+    #btn-solve:hover { background: #74c7ec; }
+    #btn-clear { background: #f38ba8; color: #1e1e2e; }
+    #btn-clear:hover { background: #eba0ac; }
+    #status { font-size: 0.875rem; color: #a6e3a1; margin-left: auto; }
+    #hint { font-size: 0.8rem; color: #6c7086; }
+    #map { flex: 1; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <h1>TSP Solver</h1>
+    <button id="btn-solve" onclick="solveTSP()">Resolver TSP</button>
+    <button id="btn-clear" onclick="clearAll()">Limpiar</button>
+    <span id="hint">Haz clic en el mapa para agregar puntos</span>
+    <span id="status"></span>
+  </div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([23.0, -102.0], 5);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    const markers = [];
+    const coordinates = [];
+    let polyline = null;
+
+    map.on('click', function (e) {
+      const { lat, lng } = e.latlng;
+      coordinates.push({ lat, lng });
+
+      const marker = L.marker([lat, lng])
+        .addTo(map)
+        .bindPopup(`Punto ${markers.length + 1}<br>lat: ${lat.toFixed(5)}, lng: ${lng.toFixed(5)}`)
+        .openPopup();
+
+      markers.push(marker);
+      setStatus(`${markers.length} punto(s) agregado(s)`);
+    });
+
+    async function solveTSP() {
+      if (coordinates.length < 3) {
+        setStatus('Agrega al menos 3 puntos primero.', true);
+        return;
+      }
+
+      setStatus('Resolviendo…');
+
+      try {
+        const response = await fetch('/solve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ coordinates }),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          setStatus('Error: ' + (data.error || response.statusText), true);
+          return;
+        }
+
+        drawRoute(data.route, data.total_distance_km);
+      } catch (err) {
+        setStatus('Error de conexión: ' + err.message, true);
+      }
+    }
+
+    function drawRoute(route, distanceKm) {
+      if (polyline) {
+        map.removeLayer(polyline);
+      }
+
+      const latlngs = route.map(c => [c.lat, c.lng]);
+      polyline = L.polyline(latlngs, {
+        color: '#f38ba8',
+        weight: 3,
+        opacity: 0.9,
+      }).addTo(map);
+
+      map.fitBounds(polyline.getBounds(), { padding: [20, 20] });
+      setStatus(`Distancia total: ${distanceKm.toFixed(1)} km`);
+    }
+
+    function clearAll() {
+      markers.forEach(m => map.removeLayer(m));
+      markers.length = 0;
+      coordinates.length = 0;
+
+      if (polyline) {
+        map.removeLayer(polyline);
+        polyline = null;
+      }
+
+      setStatus('');
+    }
+
+    function setStatus(msg, isError = false) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.style.color = isError ? '#f38ba8' : '#a6e3a1';
+    }
+  </script>
+</body>
+</html>
