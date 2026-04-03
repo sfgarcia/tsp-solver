@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>TSP Solver</title>
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#1e1e2e" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -234,6 +236,11 @@
         document.getElementById('search-results').style.display = 'none';
       }
     });
+
+    // Registrar service worker (necesario para PWA)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js');
+    }
   </script>
 </body>
 </html>

@@ -1,15 +1,42 @@
 pub mod handlers;
 pub mod tour;
 
+use axum::response::Response;
+use axum::http::{header, StatusCode};
+use axum::body::Body;
+
 #[tokio::main]
 async fn main() {
-    let html = include_str!("../static/index.html");
+    let html     = include_str!("../static/index.html");
+    let manifest = include_str!("../static/manifest.json");
+    let sw       = include_str!("../static/sw.js");
+    let icon     = include_str!("../static/icon.svg");
 
     let app = axum::Router::new()
-        .route(
-            "/",
-            axum::routing::get(move || async move { axum::response::Html(html) }),
-        )
+        .route("/", axum::routing::get(move || async move {
+            axum::response::Html(html)
+        }))
+        .route("/manifest.json", axum::routing::get(move || async move {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/manifest+json")
+                .body(Body::from(manifest))
+                .unwrap()
+        }))
+        .route("/sw.js", axum::routing::get(move || async move {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/javascript")
+                .body(Body::from(sw))
+                .unwrap()
+        }))
+        .route("/icon.svg", axum::routing::get(move || async move {
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "image/svg+xml")
+                .body(Body::from(icon))
+                .unwrap()
+        }))
         .route("/solve", axum::routing::post(handlers::solve))
         .layer(tower_http::cors::CorsLayer::permissive());
 

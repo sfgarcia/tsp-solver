@@ -1,87 +1,66 @@
 # TSP Solver
 
-A Rust implementation of the Traveling Salesman Problem (TSP) solver using the 2-opt heuristic algorithm.
+Solver del Problema del Vendedor Viajero (TSP) con interfaz web interactiva. Construido en Rust con un servidor axum, mapa Leaflet.js + OpenStreetMap, y optimización 2-opt con distancia Haversine.
 
-## Overview
+## Uso
 
-This project provides a solution to the classic Traveling Salesman Problem, where the goal is to find the shortest possible route that visits each city exactly once and returns to the original city. The implementation uses the 2-opt algorithm, a local search technique that iteratively improves an initial tour by swapping edges to reduce the total distance.
+### Local
 
-## Features
-
-- Generate random node configurations or specify custom node positions
-- Implement multiple tour construction strategies:
-  - Random tour generation
-  - Nearest Neighbor heuristic
-  - 2-opt optimization algorithm
-- Visualize the resulting tour with a clean graphical output
-
-## Getting Started
-
-### Prerequisites
-
-- [Rust](https://www.rust-lang.org/tools/install) (2021 edition or later)
-- Cargo (included with Rust)
-
-### Installation
-
-1. Clone the repository:
-   ```
-   git clone https://github.com/yourusername/sfgarcia-tsp-solver.git
-   cd sfgarcia-tsp-solver
-   ```
-
-2. Build the project:
-   ```
-   cargo build --release
-   ```
-
-### Usage
-
-Run the program with:
-
-```
+```bash
 cargo run --release
+# Abre http://localhost:3000
 ```
 
-By default, this will:
-1. Generate a random graph with 10 nodes
-2. Apply the 2-opt algorithm to optimize the tour
-3. Save the visualization as "graph.png" in the project root
+1. **Busca** una dirección en la barra de búsqueda, o **haz clic** en el mapa para agregar puntos
+2. Agrega mínimo 3 puntos
+3. Clic en **"Resolver TSP"** → dibuja la ruta óptima en rojo con la distancia total en km
+4. **"Limpiar"** para empezar de nuevo
 
-## Customization
+### Instalar en celular (PWA)
 
-You can modify the behavior by editing the `main.rs` file:
+Con la app desplegada en Railway u otro hosting HTTPS:
 
-- To use a fixed set of nodes instead of random ones, uncomment the `generate_graph()` function call
-- To use the Nearest Neighbor algorithm, uncomment the `nearest_neighbour_tour()` line
-- To use a completely random tour, uncomment the `random_tour()` line
-- To change the number of random nodes, modify the first parameter in `Tour::create_random_nodes(10, 100.0, 100.0)`
+1. Abre la URL en **Chrome** en tu Android
+2. Menú (⋮) → **"Añadir a pantalla de inicio"**
+3. Queda instalada como app nativa
 
-## How It Works
+### Deploy en Railway
 
-### Tour Construction
+1. Crea cuenta en [railway.app](https://railway.app)
+2. "Deploy from GitHub repo" → selecciona este repositorio
+3. Railway detecta Rust automáticamente y compila
+4. Settings → Networking → **"Generate Domain"** para obtener URL pública
 
-The project implements multiple strategies for constructing tours:
+La app lee la variable de entorno `PORT` (inyectada por Railway) automáticamente.
 
-1. **Random Tour**: A completely random ordering of nodes
-2. **Nearest Neighbor**: A greedy algorithm that starts at a node and repeatedly visits the nearest unvisited node
-3. **2-opt**: An optimization technique that improves a tour by reversing segments that would result in a shorter path
+## Arquitectura
 
-### 2-opt Algorithm
+```
+Browser (Leaflet.js + OpenStreetMap)
+    → click / búsqueda Nominatim para agregar puntos
+    → POST /solve  →  axum server  →  tour.rs (Haversine + 2-opt)
+    ← polyline roja ←  JSON { route, total_distance_km }
+```
 
-The 2-opt algorithm works by:
-1. Starting with an initial tour
-2. Considering all possible pairs of edges
-3. Checking if swapping these edges would shorten the total distance
-4. If so, making the swap and continuing until no more improvements can be made
+| Módulo | Responsabilidad |
+|--------|----------------|
+| `src/tour.rs` | Solver TSP: nearest-neighbour + 2-opt, distancia Haversine |
+| `src/handlers.rs` | Handler HTTP `POST /solve` |
+| `src/main.rs` | Servidor axum, sirve HTML/manifest/SW embebidos |
+| `static/index.html` | UI: mapa Leaflet, buscador Nominatim, controles |
 
-### Visualization
+## Stack
 
-The project uses the `plotters` crate to create a visual representation of the optimized route, showing:
-- Nodes as red circles with their IDs
-- Edges as black lines connecting the nodes
+- **Rust / axum** — servidor HTTP async
+- **Leaflet.js + OpenStreetMap** — mapa (sin API key)
+- **Nominatim** — geocodificación de direcciones (sin API key)
+- **Haversine** — distancia real en km entre coordenadas lat/lng
+- **PWA** — instalable en Android desde el navegador
 
-## Dependencies
+## Dependencias
 
-- [plotters](https://crates.io/crates/plotters) (0.3.5) - For visualization
-- [rand](https://crates.io/crates/rand) (0.8.5) - For random generation of nodes and tours
+- [axum](https://crates.io/crates/axum) — servidor HTTP
+- [tokio](https://crates.io/crates/tokio) — runtime async
+- [serde / serde_json](https://crates.io/crates/serde) — serialización JSON
+- [tower-http](https://crates.io/crates/tower-http) — middleware CORS
+- [rand](https://crates.io/crates/rand) — generación aleatoria
