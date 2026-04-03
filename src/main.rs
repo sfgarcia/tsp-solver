@@ -9,6 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
 
+const TOKEN_REFRESH_SECS: u64 = 50 * 60; // 50 min (token expires in 60 min)
+
 #[tokio::main]
 async fn main() {
     let html     = include_str!("../static/index.html");
@@ -21,14 +23,39 @@ async fn main() {
         .build()
         .expect("failed to build reqwest client");
 
-    let cne_token = std::env::var("CNE_TOKEN").expect("CNE_TOKEN must be set");
+    let cne_email    = std::env::var("CNE_EMAIL").expect("CNE_EMAIL must be set");
+    let cne_password = std::env::var("CNE_PASSWORD").expect("CNE_PASSWORD must be set");
+
+    println!("Logging in to CNE API...");
+    let token = handlers::login_cne(&client, &cne_email, &cne_password)
+        .await
+        .expect("CNE login failed — check CNE_EMAIL and CNE_PASSWORD");
+
     println!("Loading CNE stations...");
-    let stations = handlers::fetch_cne_stations(&client, &cne_token).await;
+    let stations = handlers::fetch_cne_stations(&client, &token).await;
     println!("Loaded {} CNE stations", stations.len());
 
     let state = Arc::new(AppState {
         client,
         cne_stations: RwLock::new(stations),
+    });
+
+    // Background task: re-login and refresh stations every 50 minutes
+    let state_bg   = Arc::clone(&state);
+    let email_bg   = cne_email.clone();
+    let password_bg = cne_password.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(TOKEN_REFRESH_SECS)).await;
+            match handlers::login_cne(&state_bg.client, &email_bg, &password_bg).await {
+                Some(new_token) => {
+                    let stations = handlers::fetch_cne_stations(&state_bg.client, &new_token).await;
+                    println!("Refreshed {} CNE stations", stations.len());
+                    *state_bg.cne_stations.write().await = stations;
+                }
+                None => eprintln!("CNE token refresh failed, retrying next cycle"),
+            }
+        }
     });
 
     let app = axum::Router::new()

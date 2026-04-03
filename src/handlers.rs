@@ -78,6 +78,18 @@ fn parse_cne_station(s: &serde_json::Value) -> Option<CneStation> {
     })
 }
 
+pub async fn login_cne(client: &reqwest::Client, email: &str, password: &str) -> Option<String> {
+    let resp = client
+        .post("https://api.cne.cl/api/login")
+        .form(&[("email", email), ("password", password)])
+        .send()
+        .await
+        .ok()?;
+
+    let json: serde_json::Value = resp.json().await.ok()?;
+    json["access_token"].as_str().map(|s| s.to_string())
+}
+
 pub async fn fetch_cne_stations(client: &reqwest::Client, token: &str) -> Vec<CneStation> {
     let resp = client
         .get("https://api.cne.cl/api/v4/estaciones")
