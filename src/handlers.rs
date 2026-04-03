@@ -91,21 +91,35 @@ pub async fn login_cne(client: &reqwest::Client, email: &str, password: &str) ->
 }
 
 pub async fn fetch_cne_stations(client: &reqwest::Client, token: &str) -> Vec<CneStation> {
-    let resp = client
+    let resp = match client
         .get("https://api.cne.cl/api/v4/estaciones")
         .bearer_auth(token)
         .send()
-        .await;
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => { eprintln!("CNE fetch error: {e}"); return Vec::new(); }
+    };
 
-    match resp {
-        Ok(r) => match r.json::<serde_json::Value>().await {
-            Ok(json) => json.as_array()
-                .map(|arr| arr.iter().filter_map(parse_cne_station).collect())
-                .unwrap_or_default(),
-            Err(_) => Vec::new(),
-        },
-        Err(_) => Vec::new(),
-    }
+    let status = resp.status();
+    let text = match resp.text().await {
+        Ok(t) => t,
+        Err(e) => { eprintln!("CNE read error: {e}"); return Vec::new(); }
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(v) => v,
+        Err(e) => { eprintln!("CNE parse error (status={status}): {e} — body: {}", &text[..text.len().min(200)]); return Vec::new(); }
+    };
+
+    json.as_array()
+        .map(|arr| arr.iter().filter_map(parse_cne_station).collect())
+        .unwrap_or_else(|| { eprintln!("CNE response is not an array (status={status})"); Vec::new() })
+}
+
+pub async fn status(State(state): State<SharedState>) -> impl IntoResponse {
+    let count = state.cne_stations.read().await.len();
+    Json(serde_json::json!({ "cne_stations": count }))
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────

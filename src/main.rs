@@ -85,6 +85,7 @@ async fn main() {
         }))
         .route("/solve", axum::routing::post(handlers::solve))
         .route("/bencineras", axum::routing::get(handlers::bencineras))
+        .route("/status", axum::routing::get(handlers::status))
         .with_state(state)
         .layer(tower_http::cors::CorsLayer::permissive());
 
