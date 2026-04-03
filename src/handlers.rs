@@ -1,8 +1,14 @@
-use axum::{extract::{Json, Query}, http::StatusCode, response::IntoResponse};
+use axum::{extract::{Json, Query, State}, http::StatusCode, response::IntoResponse};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 use crate::tour::Tour;
 
 // ── Bencineras ────────────────────────────────────────────────────────────────
+
+pub type BencineraCache = Arc<RwLock<HashMap<String, (Vec<Bencinera>, Instant)>>>;
 
 #[derive(Deserialize)]
 pub struct BoundsQuery {
@@ -12,7 +18,7 @@ pub struct BoundsQuery {
     pub east:  f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Bencinera {
     pub lat:       f64,
     pub lng:       f64,
@@ -20,7 +26,19 @@ pub struct Bencinera {
     pub direccion: String,
 }
 
-pub async fn bencineras(Query(b): Query<BoundsQuery>) -> impl IntoResponse {
+pub async fn bencineras(
+    State(cache): State<BencineraCache>,
+    Query(b): Query<BoundsQuery>,
+) -> impl IntoResponse {
+    let key = format!("{:.2}:{:.2}:{:.2}:{:.2}", b.south, b.north, b.west, b.east);
+    {
+        let guard = cache.read().await;
+        if let Some((data, ts)) = guard.get(&key) {
+            if ts.elapsed() < Duration::from_secs(86400) {
+                return (StatusCode::OK, Json(data.clone())).into_response();
+            }
+        }
+    }
     // Overpass API: amenity=fuel dentro del bounding box
     let query = format!(
         "[out:json][timeout:10];node[\"amenity\"=\"fuel\"]({},{},{},{});out;",
@@ -88,6 +106,10 @@ pub async fn bencineras(Query(b): Query<BoundsQuery>) -> impl IntoResponse {
         })
         .collect();
 
+    {
+        let mut guard = cache.write().await;
+        guard.insert(key, (bencineras.clone(), Instant::now()));
+    }
     (StatusCode::OK, Json(bencineras)).into_response()
 }
 
