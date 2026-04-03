@@ -32,14 +32,60 @@
     #status { font-size: 0.875rem; color: #a6e3a1; margin-left: auto; }
     #hint { font-size: 0.8rem; color: #6c7086; }
     #map { flex: 1; }
+
+    #search-wrapper {
+      position: relative;
+      display: flex;
+      gap: 6px;
+    }
+    #search-input {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid #45475a;
+      background: #313244;
+      color: #cdd6f4;
+      font-size: 0.875rem;
+      width: 220px;
+      outline: none;
+    }
+    #search-input::placeholder { color: #6c7086; }
+    #btn-search { background: #a6e3a1; color: #1e1e2e; }
+    #btn-search:hover { background: #94e2d5; }
+    #search-results {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      width: 320px;
+      background: #313244;
+      border: 1px solid #45475a;
+      border-radius: 6px;
+      z-index: 1000;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .search-result-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: #cdd6f4;
+      border-bottom: 1px solid #45475a;
+    }
+    .search-result-item:last-child { border-bottom: none; }
+    .search-result-item:hover { background: #45475a; }
   </style>
 </head>
 <body>
   <div id="controls">
     <h1>TSP Solver</h1>
+    <div id="search-wrapper">
+      <input id="search-input" type="text" placeholder="Buscar dirección…"
+             onkeydown="if(event.key==='Enter') searchAddress()" />
+      <button id="btn-search" onclick="searchAddress()">Buscar</button>
+      <div id="search-results" style="display:none;"></div>
+    </div>
     <button id="btn-solve" onclick="solveTSP()">Resolver TSP</button>
     <button id="btn-clear" onclick="clearAll()">Limpiar</button>
-    <span id="hint">Haz clic en el mapa para agregar puntos</span>
+    <span id="hint">Busca o haz clic en el mapa para agregar puntos</span>
     <span id="status"></span>
   </div>
   <div id="map"></div>
@@ -132,6 +178,62 @@
       el.textContent = msg;
       el.style.color = isError ? '#f38ba8' : '#a6e3a1';
     }
+
+    // --- Geocoder (Nominatim / OpenStreetMap) ---
+    async function searchAddress() {
+      const query = document.getElementById('search-input').value.trim();
+      if (!query) return;
+
+      const resultsEl = document.getElementById('search-results');
+      resultsEl.style.display = 'none';
+      resultsEl.innerHTML = '';
+      setStatus('Buscando…');
+
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`;
+        const res = await fetch(url, { headers: { 'Accept-Language': 'es' } });
+        const results = await res.json();
+
+        if (results.length === 0) {
+          setStatus('No se encontraron resultados.', true);
+          return;
+        }
+
+        setStatus('');
+        results.forEach(r => {
+          const item = document.createElement('div');
+          item.className = 'search-result-item';
+          item.textContent = r.display_name;
+          item.onclick = () => selectSearchResult(parseFloat(r.lat), parseFloat(r.lon), r.display_name);
+          resultsEl.appendChild(item);
+        });
+        resultsEl.style.display = 'block';
+      } catch (err) {
+        setStatus('Error al buscar: ' + err.message, true);
+      }
+    }
+
+    function selectSearchResult(lat, lng, name) {
+      document.getElementById('search-results').style.display = 'none';
+      document.getElementById('search-input').value = '';
+
+      map.setView([lat, lng], 14);
+
+      coordinates.push({ lat, lng });
+      const marker = L.marker([lat, lng])
+        .addTo(map)
+        .bindPopup(`Punto ${markers.length + 1}<br>${name}`)
+        .openPopup();
+      markers.push(marker);
+      setStatus(`${markers.length} punto(s) agregado(s)`);
+    }
+
+    // Cerrar resultados al hacer clic fuera
+    document.addEventListener('click', e => {
+      if (!document.getElementById('search-wrapper').contains(e.target)) {
+        document.getElementById('search-results').style.display = 'none';
+      }
+    });
   </script>
 </body>
 </html>
