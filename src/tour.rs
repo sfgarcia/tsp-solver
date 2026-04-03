@@ -209,7 +209,7 @@ impl Tour {
 
 }
 
-fn haversine_km(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
+pub fn haversine_km(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
     const R: f64 = 6371.0;
     let dlat = (lat2 - lat1).to_radians();
     let dlng = (lng2 - lng1).to_radians();

@@ -19,12 +19,28 @@ async fn main() {
     // Load cache from disk (if it exists)
     let initial_tiles = handlers::load_cache_from_disk().await;
 
+    // Build client for both Overpass and CNE
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .expect("failed to build reqwest client");
+
+    // Fetch CNE stations if token is provided
+    let cne_token = std::env::var("CNE_TOKEN").ok();
+    let initial_cne = if let Some(ref token) = cne_token {
+        println!("Loading CNE fuel prices...");
+        let stations = handlers::fetch_cne_stations(&client, token).await;
+        println!("Loaded {} CNE stations", stations.len());
+        stations
+    } else {
+        println!("CNE_TOKEN not set, fuel prices will not be available");
+        Vec::new()
+    };
+
     let state: SharedState = Arc::new(AppState {
         tiles: RwLock::new(initial_tiles),
-        client: reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .build()
-            .expect("failed to build reqwest client"),
+        client,
+        cne_stations: RwLock::new(initial_cne),
     });
 
     let app = axum::Router::new()

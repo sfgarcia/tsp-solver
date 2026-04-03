@@ -90,6 +90,7 @@ async fn save_cache_to_disk(snapshot: TileCache) {
 pub struct AppState {
     pub tiles: RwLock<TileCache>,
     pub client: reqwest::Client,
+    pub cne_stations: RwLock<Vec<CneStation>>,
 }
 
 pub type SharedState = Arc<AppState>;
@@ -110,6 +111,17 @@ pub struct Bencinera {
     pub lng:       f64,
     pub nombre:    String,
     pub direccion: String,
+    pub precio_93: Option<String>,
+    pub precio_95: Option<String>,
+    pub precio_97: Option<String>,
+}
+
+// ── CNE Stations (for price enrichment) ────────────────────────────────────
+
+#[derive(Clone)]
+pub struct CneStation {
+    pub lat: f64,
+    pub lng: f64,
     pub precio_93: Option<String>,
     pub precio_95: Option<String>,
     pub precio_97: Option<String>,
@@ -166,6 +178,54 @@ async fn fetch_tile(
         }
     }
     None
+}
+
+/// Fetch fuel prices from CNE API for Metropolitana region.
+/// Returns list of stations with lat/lng and current fuel prices.
+pub async fn fetch_cne_stations(client: &reqwest::Client, token: &str) -> Vec<CneStation> {
+    let url = format!("http://api.cne.cl/v3/combustibles/vehicular/estaciones?token={}", token);
+
+    match client.get(&url).send().await {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(json) => {
+                if let Some(stations) = json.as_array() {
+                    stations.iter().filter_map(|s| {
+                        let lat = s["latitud"].as_f64()?;
+                        let lng = s["longitud"].as_f64()?;
+                        let precios = &s["precio_por_combustible"];
+
+                        Some(CneStation {
+                            lat,
+                            lng,
+                            precio_93: precios["gasolina_93"].as_i64().map(|p| p.to_string()),
+                            precio_95: precios["gasolina_95"].as_i64().map(|p| p.to_string()),
+                            precio_97: precios["gasolina_97"].as_i64().map(|p| p.to_string()),
+                        })
+                    }).collect()
+                } else {
+                    Vec::new()
+                }
+            }
+            Err(_) => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Find nearest CNE station within max_km distance.
+fn nearest_cne_station(stations: &[CneStation], lat: f64, lng: f64, max_km: f64) -> Option<&CneStation> {
+    use crate::tour::haversine_km;
+
+    let mut best: Option<(&CneStation, f64)> = None;
+    for station in stations {
+        let dist = haversine_km(lat, lng, station.lat, station.lng);
+        if dist <= max_km {
+            if best.is_none() || dist < best.unwrap().1 {
+                best = Some((station, dist));
+            }
+        }
+    }
+    best.map(|(s, _)| s)
 }
 
 pub async fn bencineras(
@@ -244,6 +304,18 @@ pub async fn bencineras(
         item.lat >= b.south && item.lat <= b.north
             && item.lng >= b.west && item.lng <= b.east
     });
+
+    // ── 6. Enrich with CNE prices ──────────────────────────────────────────
+    let cne = state.cne_stations.read().await;
+    if !cne.is_empty() {
+        for ben in &mut all_bencineras {
+            if let Some(station) = nearest_cne_station(&cne, ben.lat, ben.lng, 0.3) {
+                ben.precio_93 = station.precio_93.clone();
+                ben.precio_95 = station.precio_95.clone();
+                ben.precio_97 = station.precio_97.clone();
+            }
+        }
+    }
 
     (StatusCode::OK, Json(all_bencineras)).into_response()
 }
