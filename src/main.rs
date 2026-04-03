@@ -38,6 +38,7 @@ async fn main() {
                 .unwrap()
         }))
         .route("/solve", axum::routing::post(handlers::solve))
+        .route("/bencineras", axum::routing::get(handlers::bencineras))
         .layer(tower_http::cors::CorsLayer::permissive());
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
