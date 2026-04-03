@@ -102,14 +102,30 @@ pub async fn fetch_cne_stations(client: &reqwest::Client, token: &str) -> Vec<Cn
     };
 
     let status = resp.status();
-    let text = match resp.text().await {
-        Ok(t) => t,
+    let bytes = match resp.bytes().await {
+        Ok(b) => b,
         Err(e) => { eprintln!("CNE read error: {e}"); return Vec::new(); }
     };
 
-    let json: serde_json::Value = match serde_json::from_str(&text) {
-        Ok(v) => v,
-        Err(e) => { eprintln!("CNE parse error (status={status}): {e} — body: {}", &text[..text.len().min(200)]); return Vec::new(); }
+    // Try to decompress gzip manually if needed
+    let json: serde_json::Value = if bytes.starts_with(b"\x1f\x8b") {
+        // gzip magic bytes — decompress manually
+        use std::io::Read;
+        let mut decoder = flate2::read::GzDecoder::new(&bytes[..]);
+        let mut decompressed = Vec::new();
+        if decoder.read_to_end(&mut decompressed).is_err() {
+            eprintln!("CNE gzip decompress error");
+            return Vec::new();
+        }
+        match serde_json::from_slice(&decompressed) {
+            Ok(v) => v,
+            Err(e) => { eprintln!("CNE parse error after decompress: {e}"); return Vec::new(); }
+        }
+    } else {
+        match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(e) => { eprintln!("CNE parse error (status={status}): {e}"); return Vec::new(); }
+        }
     };
 
     json.as_array()
