@@ -2,7 +2,7 @@ use axum::{extract::{Json, Query, State}, http::StatusCode, response::IntoRespon
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use crate::tour::Tour;
 
@@ -11,6 +11,17 @@ use crate::tour::Tour;
 const MAX_NODES: usize = 200;
 const SOLVER_TIMEOUT_SECS: u64 = 30;
 const BENCINERA_TTL_SECS: u64 = 86400;
+pub const CACHE_FILE: &str = "bencineras_cache.json";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn now_unix() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+}
+
+fn is_fresh(timestamp: u64) -> bool {
+    now_unix().saturating_sub(timestamp) < BENCINERA_TTL_SECS
+}
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
@@ -18,10 +29,27 @@ fn is_valid_coord(lat: f64, lng: f64) -> bool {
     lat.is_finite() && lng.is_finite() && lat >= -90.0 && lat <= 90.0 && lng >= -180.0 && lng <= 180.0
 }
 
+// ── Cache persistence ─────────────────────────────────────────────────────────
+
+pub type CacheMap = HashMap<String, (Vec<Bencinera>, u64)>;
+
+pub async fn load_cache_from_disk() -> CacheMap {
+    match tokio::fs::read_to_string(CACHE_FILE).await {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+        Err(_) => CacheMap::new(),
+    }
+}
+
+async fn save_cache_to_disk(snapshot: CacheMap) {
+    if let Ok(json) = serde_json::to_string(&snapshot) {
+        let _ = tokio::fs::write(CACHE_FILE, json).await;
+    }
+}
+
 // ── Application State ──────────────────────────────────────────────────────────
 
 pub struct AppState {
-    pub cache: RwLock<HashMap<String, (Vec<Bencinera>, Instant)>>,
+    pub cache: RwLock<CacheMap>,
     pub client: reqwest::Client,
 }
 
@@ -37,7 +65,7 @@ pub struct BoundsQuery {
     pub east:  f64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Bencinera {
     pub lat:       f64,
     pub lng:       f64,
@@ -58,7 +86,7 @@ pub async fn bencineras(
     {
         let guard = state.cache.read().await;
         if let Some((data, ts)) = guard.get(&key) {
-            if ts.elapsed() < Duration::from_secs(BENCINERA_TTL_SECS) {
+            if is_fresh(*ts) {
                 return (StatusCode::OK, Json(data.clone())).into_response();
             }
         }
@@ -132,8 +160,14 @@ pub async fn bencineras(
     {
         let mut guard = state.cache.write().await;
         // Evict stale entries before inserting new one
-        guard.retain(|_, (_, ts)| ts.elapsed() < Duration::from_secs(BENCINERA_TTL_SECS));
-        guard.insert(key, (bencineras.clone(), Instant::now()));
+        guard.retain(|_, (_, ts)| is_fresh(*ts));
+        guard.insert(key, (bencineras.clone(), now_unix()));
+
+        // Spawn background task to persist cache to disk
+        let snapshot = guard.clone();
+        tokio::spawn(async move {
+            save_cache_to_disk(snapshot).await;
+        });
     }
     (StatusCode::OK, Json(bencineras)).into_response()
 }

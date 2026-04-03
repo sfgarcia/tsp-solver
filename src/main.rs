@@ -17,8 +17,11 @@ async fn main() {
     let sw       = include_str!("../static/sw.js");
     let icon     = include_str!("../static/icon.svg");
 
+    // Load cache from disk (if it exists)
+    let initial_cache = handlers::load_cache_from_disk().await;
+
     let state: SharedState = Arc::new(AppState {
-        cache: RwLock::new(HashMap::new()),
+        cache: RwLock::new(initial_cache),
         client: reqwest::Client::builder()
             .timeout(Duration::from_secs(12))
             .build()
