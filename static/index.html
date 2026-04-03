@@ -12,13 +12,19 @@
     body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }
     #controls {
       display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 16px;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 12px;
       background: #1e1e2e;
       color: #cdd6f4;
     }
-    #controls h1 { font-size: 1rem; font-weight: 600; margin-right: 8px; }
+    #row1, #row2 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+    #controls h1 { font-size: 1rem; font-weight: 600; white-space: nowrap; }
     button {
       padding: 6px 14px;
       border: none;
@@ -26,18 +32,21 @@
       cursor: pointer;
       font-size: 0.875rem;
       font-weight: 500;
+      white-space: nowrap;
     }
-    #btn-solve { background: #89b4fa; color: #1e1e2e; }
+    #btn-solve { background: #89b4fa; color: #1e1e2e; flex: 1; }
     #btn-solve:hover { background: #74c7ec; }
-    #btn-clear { background: #f38ba8; color: #1e1e2e; }
+    #btn-clear { background: #f38ba8; color: #1e1e2e; flex: 1; }
     #btn-clear:hover { background: #eba0ac; }
-    #status { font-size: 0.875rem; color: #a6e3a1; margin-left: auto; }
-    #hint { font-size: 0.8rem; color: #6c7086; }
+    #status { font-size: 0.8rem; color: #a6e3a1; }
+    #hint { font-size: 0.8rem; color: #6c7086; display: none; }
+    @media (min-width: 600px) { #hint { display: inline; } }
     #map { flex: 1; }
 
     #search-wrapper {
       position: relative;
       display: flex;
+      flex: 1;
       gap: 6px;
     }
     #search-input {
@@ -47,7 +56,8 @@
       background: #313244;
       color: #cdd6f4;
       font-size: 0.875rem;
-      width: 220px;
+      flex: 1;
+      min-width: 0;
       outline: none;
     }
     #search-input::placeholder { color: #6c7086; }
@@ -78,17 +88,21 @@
 </head>
 <body>
   <div id="controls">
-    <h1>TSP Solver</h1>
-    <div id="search-wrapper">
-      <input id="search-input" type="text" placeholder="Buscar dirección…"
-             onkeydown="if(event.key==='Enter') searchAddress()" />
-      <button id="btn-search" onclick="searchAddress()">Buscar</button>
-      <div id="search-results" style="display:none;"></div>
+    <div id="row1">
+      <h1>TSP</h1>
+      <div id="search-wrapper">
+        <input id="search-input" type="text" placeholder="Buscar dirección…"
+               onkeydown="if(event.key==='Enter') searchAddress()" />
+        <button id="btn-search" onclick="searchAddress()">Buscar</button>
+        <div id="search-results" style="display:none;"></div>
+      </div>
     </div>
-    <button id="btn-solve" onclick="solveTSP()">Resolver TSP</button>
-    <button id="btn-clear" onclick="clearAll()">Limpiar</button>
-    <span id="hint">Busca o haz clic en el mapa para agregar puntos</span>
-    <span id="status"></span>
+    <div id="row2">
+      <button id="btn-solve" onclick="solveTSP()">Calcular ruta</button>
+      <button id="btn-clear" onclick="clearAll()">Limpiar</button>
+      <span id="status"></span>
+      <span id="hint">Busca o haz clic en el mapa para agregar puntos</span>
+    </div>
   </div>
   <div id="map"></div>
 
