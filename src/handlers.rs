@@ -170,6 +170,33 @@ pub async fn fetch_cne_stations(client: &reqwest::Client, token: &str) -> Vec<Cn
         .unwrap_or_else(|| { eprintln!("CNE response is not an array (status={status})"); Vec::new() })
 }
 
+/// Proxies an OSRM route request server-side to avoid Mixed Content (HTTP from HTTPS page).
+/// Accepts the ordered route from /solve and returns the full road geometry.
+pub async fn route_geometry(
+    State(state): State<SharedState>,
+    Json(payload): Json<SolveRequest>,
+) -> impl IntoResponse {
+    let coord_str = payload.coordinates.iter()
+        .map(|c| format!("{},{}", c.lng, c.lat))
+        .collect::<Vec<_>>()
+        .join(";");
+    let url = format!(
+        "http://router.project-osrm.org/route/v1/driving/{}?overview=full&geometries=geojson",
+        coord_str
+    );
+    match tokio::time::timeout(
+        Duration::from_secs(OSRM_TIMEOUT_SECS),
+        state.client.get(&url).send(),
+    ).await {
+        Ok(Ok(resp)) => {
+            let body: serde_json::Value = resp.json().await.unwrap_or_default();
+            (StatusCode::OK, Json(body)).into_response()
+        }
+        _ => (StatusCode::BAD_GATEWAY,
+              Json(serde_json::json!({"error": "OSRM unavailable"}))).into_response(),
+    }
+}
+
 pub async fn status(State(state): State<SharedState>) -> impl IntoResponse {
     let count = state.cne_stations.read().await.len();
     Json(serde_json::json!({ "cne_stations": count }))

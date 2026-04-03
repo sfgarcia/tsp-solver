@@ -85,6 +85,7 @@ async fn main() {
         }))
         .route("/solve", axum::routing::post(handlers::solve))
         .route("/bencineras", axum::routing::get(handlers::bencineras))
+        .route("/route-geometry", axum::routing::post(handlers::route_geometry))
         .route("/status", axum::routing::get(handlers::status))
         .route("/debug-cne", axum::routing::get(handlers::debug_cne))
         .with_state(state)

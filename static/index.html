@@ -165,10 +165,12 @@
     }
 
     async function fetchOsrmGeometry(route) {
-      const coords = route.map(c => `${c.lng},${c.lat}`).join(';');
-      const url = `http://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
       try {
-        const resp = await fetch(url);
+        const resp = await fetch('/route-geometry', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ coordinates: route })
+        });
         const data = await resp.json();
         if (data.routes && data.routes[0]) return data.routes[0].geometry;
       } catch (_) {}
