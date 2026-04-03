@@ -130,6 +130,75 @@ impl Tour {
         }
     }
 
+    // Or-opt: moves segments of size 1, 2, and 3 to a better position in the tour.
+    // Runs after 2-opt to escape local optima that 2-opt cannot improve.
+    pub fn or_opt(&mut self) {
+        let mut improved = true;
+        while improved {
+            improved = false;
+            // n = number of cities (route has n+1 nodes, last == first)
+            let n = self.route.len() - 1;
+            'outer: for seg_size in 1..=3 {
+                for i in 1..n - seg_size + 1 {
+                    // Segment is route[i..i+seg_size]
+                    let prev  = i - 1;
+                    let last  = i + seg_size - 1;
+                    let next  = i + seg_size; // may equal n (the closing node)
+
+                    if next > n { continue; }
+
+                    // Cost of removing the segment from its current position
+                    let removal_gain =
+                        self.distance[self.route[prev].id][self.route[i].id]
+                        + self.distance[self.route[last].id][self.route[next].id]
+                        - self.distance[self.route[prev].id][self.route[next].id];
+
+                    // Try inserting the segment after every other position j
+                    for j in 1..n {
+                        // Skip positions that overlap with the segment itself
+                        if j >= prev && j <= last { continue; }
+
+                        let j_next = if j + 1 > n { 1 } else { j + 1 };
+
+                        let insertion_cost =
+                            self.distance[self.route[j].id][self.route[i].id]
+                            + self.distance[self.route[last].id][self.route[j_next].id]
+                            - self.distance[self.route[j].id][self.route[j_next].id];
+
+                        if removal_gain - insertion_cost > 1e-6 {
+                            // Rebuild route with segment relocated
+                            let segment: Vec<Node> = self.route[i..=last].to_vec();
+                            let mut new_route: Vec<Node> = Vec::with_capacity(self.route.len());
+
+                            // Walk the original route skipping the segment,
+                            // inserting it after position j
+                            let mut k = 0;
+                            while k <= n {
+                                if k == i {
+                                    k = last + 1; // skip segment
+                                    continue;
+                                }
+                                new_route.push(self.route[k].clone());
+                                // Insert segment after the adjusted j position
+                                let adjusted_j = if j < i { j } else { j - seg_size };
+                                if new_route.len() - 1 == adjusted_j {
+                                    new_route.extend(segment.iter().cloned());
+                                }
+                                k += 1;
+                            }
+
+                            if new_route.len() == self.route.len() {
+                                self.route = new_route;
+                                improved = true;
+                                break 'outer;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 }
 
 fn haversine_km(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
