@@ -158,26 +158,48 @@
           return;
         }
 
-        drawRoute(data.route, data.total_distance_km);
+        await drawRoute(data);
       } catch (err) {
         setStatus('Error de conexión: ' + err.message, true);
       }
     }
 
-    function drawRoute(route, distanceKm) {
-      if (polyline) {
-        map.removeLayer(polyline);
+    async function fetchOsrmGeometry(route) {
+      const coords = route.map(c => `${c.lng},${c.lat}`).join(';');
+      const url = `http://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`;
+      try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+        if (data.routes && data.routes[0]) return data.routes[0].geometry;
+      } catch (_) {}
+      return null;
+    }
+
+    async function drawRoute(data) {
+      if (polyline) map.removeLayer(polyline);
+
+      if (data.routing === 'osrm') {
+        setStatus('Trazando ruta por calles…');
+        const geometry = await fetchOsrmGeometry(data.route);
+        if (geometry) {
+          // GeoJSON coordinates are [lng, lat] — Leaflet needs [lat, lng]
+          const latlngs = geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+          polyline = L.polyline(latlngs, { color: '#f38ba8', weight: 4, opacity: 0.9 }).addTo(map);
+          map.fitBounds(polyline.getBounds(), { padding: [20, 20] });
+          const mins = Math.round(data.total_travel_time_secs / 60);
+          setStatus(`Tiempo estimado: ${mins} min (ruta real por calles)`);
+          return;
+        }
       }
 
-      const latlngs = route.map(c => [c.lat, c.lng]);
-      polyline = L.polyline(latlngs, {
-        color: '#f38ba8',
-        weight: 3,
-        opacity: 0.9,
-      }).addTo(map);
-
+      // Fallback: straight lines
+      const latlngs = data.route.map(c => [c.lat, c.lng]);
+      polyline = L.polyline(latlngs, { color: '#f38ba8', weight: 3, opacity: 0.9 }).addTo(map);
       map.fitBounds(polyline.getBounds(), { padding: [20, 20] });
-      setStatus(`Distancia total: ${distanceKm.toFixed(1)} km`);
+      const label = data.total_distance_km != null
+        ? `Distancia total: ${data.total_distance_km.toFixed(1)} km`
+        : `Tiempo estimado: ${Math.round(data.total_travel_time_secs / 60)} min`;
+      setStatus(label);
     }
 
     function clearAll() {
